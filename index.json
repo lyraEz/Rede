@@ -1,0 +1,19 @@
+[
+  {
+    "name": "Aniyomi: RedeToons",
+    "pkg": "eu.kanade.tachiyomi.animeextension.pt.redetoons",
+    "apk": "aniyomi-pt.redetoons-v1000-7.apk",
+    "lang": "pt-BR",
+    "code": 1000007,
+    "version": "1000-7",
+    "nsfw": 0,
+    "sources": [
+      {
+        "name": "RedeToons",
+        "lang": "pt-BR",
+        "id": "5791416117185453153",
+        "baseUrl": "https://redetoons.email"
+      }
+    ]
+  }
+]
