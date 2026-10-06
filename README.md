@@ -8,7 +8,7 @@ Adicione este repositório ao Aniyomi:
 
 `https://raw.githubusercontent.com/lyraEz/Rede/repo/index.min.json`
 
-O APK está em [`repo/apk/aniyomi-pt.redetoons-v1000-7.apk`](https://github.com/lyraEz/Rede/blob/repo/apk/aniyomi-pt.redetoons-v1000-7.apk).
+O APK está em [`repo/apk/aniyomi-pt.redetoons-v1000-7-r1.apk`](https://github.com/lyraEz/Rede/blob/repo/apk/aniyomi-pt.redetoons-v1000-7-r1.apk).
 
 O índice antigo (`index.min.json`) aponta para [`repo.json`](https://raw.githubusercontent.com/lyraEz/Rede/repo/repo.json), que encaminha o Aniyomi atual para [`store.json`](https://raw.githubusercontent.com/lyraEz/Rede/repo/store.json). Os três arquivos são mantidos para compatibilidade. No índice antigo, o campo `version` é `14.1000-7`, pois esse formato exige um prefixo numérico da biblioteca; a versão do APK e da loja atual é `1000-7`.
 
