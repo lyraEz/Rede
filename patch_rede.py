@@ -79,4 +79,15 @@ data = config.read_text()
 data = replace_once(data, "  versionCode: 2\n  versionName: 14.2",
                     "  versionCode: 1000007\n  versionName: 1000-7", "version")
 config.write_text(data)
+
+manifest = root / "AndroidManifest.xml"
+data = manifest.read_text()
+data = replace_once(
+    data,
+    '<meta-data android:name="tachiyomi.animeextension.class" android:value=".RedeToons"/>',
+    '<meta-data android:name="tachiyomi.animeextension.class" android:value=".RedeToons"/>\n'
+    '        <meta-data android:name="aniyomix.extensionLib" android:value="14"/>',
+    "Aniyomi library metadata",
+)
+manifest.write_text(data)
 print("Patched RedeToons to 1000-7")
