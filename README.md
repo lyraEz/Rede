@@ -1,6 +1,6 @@
 # Rede
 
-Extensões para Aniyomi, AniZen e NyanTV.
+Extensões para Aniyomi, AniZen, Yomira e NyanTV.
 
 ## Adicionar a loja
 
@@ -10,11 +10,13 @@ Extensões para Aniyomi, AniZen e NyanTV.
 https://raw.githubusercontent.com/lyraEz/Rede/repo/store-v2.json
 ```
 
-**AniZen e NyanTV**
+**AniZen, Yomira e NyanTV**
 
 ```text
 https://raw.githubusercontent.com/lyraEz/Rede/repo/index.min.json
 ```
+
+No [Yomira](https://github.com/lyraEz/Yomira) a Rede também aparece como sugestão ao adicionar um repositório, sem precisar digitar o endereço.
 
 Depois de adicionar a loja, atualize a lista de extensões no aplicativo.
 
