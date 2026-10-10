@@ -12,7 +12,7 @@ python patch_rede.py decoded
 java -jar apktool.jar b -f decoded -o redetoons-unsigned.apk
 ```
 
-O `-f` no build é necessário para atualizar a versão no manifesto. Assine o APK com a chave privada da Rede, que não fica no repositório, e confira a assinatura antes de publicar. O certificado SHA-256 é `2e477a744a47fe5a7349816c1a4524dc48b2469610d094f62c1bc2782b94c5a6`.
+O `-f` no build é necessário para atualizar a versão no manifesto. O nome de versão do APK começa com a versão da biblioteca (`14.`), usada pelo NyanTV para reconhecer a extensão. O script também mantém os métodos de vídeo antigos exigidos por esse aplicativo. Assine o APK com a chave privada da Rede, que não fica no repositório, e confira a assinatura antes de publicar. O certificado SHA-256 é `2e477a744a47fe5a7349816c1a4524dc48b2469610d094f62c1bc2782b94c5a6`.
 
 Para adicionar uma extensão ao catálogo, coloque o APK em `apk/`, o ícone em `icon/`, atualize `extensions.json` e execute:
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the RedeToons 1000-8 changes to an Apktool decoded 14.2 APK.
+"""Apply the RedeToons 1000-9 changes to an Apktool decoded 14.2 APK.
 
 Usage: python patch_rede.py PATH_TO_APKTOOL_DECODED_DIRECTORY
 """
@@ -72,12 +72,66 @@ new_details_url = '''    const-string v2, "/api/tmdb/"
     .line 49
     invoke-static {p1, v2, v1, v3, v1}, Lkotlin/text/StringsKt;->substringAfter$default(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ljava/lang/String;'''
 data = replace_once(data, old_details_url, new_details_url, "details media type")
+
+# Create the default hoster through the source API's common helper. NyanTV has
+# the older four-argument Hoster constructor, while Aniyomi/AniZen have a
+# newer constructor. The helper exists in all three apps.
+method = ".method protected hosterListParse(Lokhttp3/Response;)Ljava/util/List;"
+if data.count(method) != 1:
+    raise RuntimeError("Expected one hosterListParse method")
+start = data.index(method)
+end = data.index(".end method", start) + len(".end method")
+data = data[:start] + '''.method protected hosterListParse(Lokhttp3/Response;)Ljava/util/List;
+    .locals 2
+
+    sget-object v0, Leu/kanade/tachiyomi/animesource/model/Hoster;->Companion:Leu/kanade/tachiyomi/animesource/model/Hoster$Companion;
+
+    invoke-direct {p0, p1}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->w(Lokhttp3/Response;)Ljava/util/List;
+    move-result-object v1
+
+    invoke-virtual {v0, v1}, Leu/kanade/tachiyomi/animesource/model/Hoster$Companion;->toHosterList(Ljava/util/List;)Ljava/util/List;
+    move-result-object v0
+
+    return-object v0
+.end method''' + data[end:]
+
+# NyanTV still uses the legacy video list methods and requires the old
+# episodeVideoParse abstract method. Modern Aniyomi uses the hoster methods.
+legacy_video_methods = '''.method protected videoListRequest(Leu/kanade/tachiyomi/animesource/model/SEpisode;)Lokhttp3/Request;
+    .locals 1
+
+    invoke-virtual {p0, p1}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->hosterListRequest(Leu/kanade/tachiyomi/animesource/model/SEpisode;)Lokhttp3/Request;
+    move-result-object v0
+
+    return-object v0
+.end method
+
+.method protected videoListParse(Lokhttp3/Response;)Ljava/util/List;
+    .locals 1
+
+    invoke-direct {p0, p1}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->w(Lokhttp3/Response;)Ljava/util/List;
+    move-result-object v0
+
+    return-object v0
+.end method
+
+.method protected episodeVideoParse(Lokhttp3/Response;)Leu/kanade/tachiyomi/animesource/model/SEpisode;
+    .locals 2
+
+    new-instance v0, Ljava/lang/UnsupportedOperationException;
+    const-string v1, "Episode video metadata not used"
+    invoke-direct {v0, v1}, Ljava/lang/UnsupportedOperationException;-><init>(Ljava/lang/String;)V
+    throw v0
+.end method
+
+'''
+data = data.replace(method, legacy_video_methods + method, 1)
 source.write_text(data)
 
 config = root / "apktool.yml"
 data = config.read_text()
 data = replace_once(data, "  versionCode: 2\n  versionName: 14.2",
-                    "  versionCode: 1000008\n  versionName: 1000-8", "version")
+                    "  versionCode: 1000009\n  versionName: 14.1000-9", "version")
 config.write_text(data)
 
 manifest = root / "AndroidManifest.xml"
@@ -90,4 +144,4 @@ data = replace_once(
     "Aniyomi library metadata",
 )
 manifest.write_text(data)
-print("Patched RedeToons to 1000-8")
+print("Patched RedeToons to 1000-9")
