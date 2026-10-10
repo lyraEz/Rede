@@ -1,0 +1,18 @@
+{
+  "storeName": "Rede",
+  "signingKey": "2e477a744a47fe5a7349816c1a4524dc48b2469610d094f62c1bc2782b94c5a6",
+  "extensions": [
+    {
+      "name": "RedeToons",
+      "packageName": "eu.kanade.tachiyomi.animeextension.pt.redetoons",
+      "apk": "aniyomi-pt.redetoons-v1000-8.apk",
+      "icon": "eu.kanade.tachiyomi.animeextension.pt.redetoons.png",
+      "lang": "pt-BR",
+      "versionCode": 1000008,
+      "versionName": "1000-8",
+      "sourceId": "5791416117185453153",
+      "baseUrl": "https://redetoons.gay",
+      "contentWarning": "SAFE"
+    }
+  ]
+}
