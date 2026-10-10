@@ -2,10 +2,10 @@
   {
     "name": "Aniyomi: RedeToons",
     "pkg": "eu.kanade.tachiyomi.animeextension.pt.redetoons",
-    "apk": "aniyomi-pt.redetoons-v1000-8.apk",
+    "apk": "aniyomi-pt.redetoons-v1000-9.apk",
     "lang": "pt-BR",
-    "code": 1000008,
-    "version": "14.1000-8",
+    "code": 1000009,
+    "version": "14.1000-9",
     "nsfw": 0,
     "sources": [
       {
