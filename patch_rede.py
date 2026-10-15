@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the RedeToons 1000-9 changes to an Apktool decoded 14.2 APK.
+"""Apply the RedeToons 1000-10 changes to an Apktool decoded 14.2 APK.
 
 Usage: python patch_rede.py PATH_TO_APKTOOL_DECODED_DIRECTORY
 """
@@ -19,7 +19,7 @@ root = Path(sys.argv[1])
 source = root / "smali/eu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons.smali"
 data = source.read_text()
 data = replace_once(data, 'const-string v0, "https://redetoons.win"',
-                    'const-string v0, "https://redetoons.gay"', "base URL")
+                    'const-string v0, "https://redetoons.bond"', "base URL")
 
 old_catalog_poster = '''    if-eqz p1, :cond_2
 
@@ -131,7 +131,7 @@ source.write_text(data)
 config = root / "apktool.yml"
 data = config.read_text()
 data = replace_once(data, "  versionCode: 2\n  versionName: 14.2",
-                    "  versionCode: 1000009\n  versionName: 14.1000-9", "version")
+                    "  versionCode: 1000010\n  versionName: 14.1000-10", "version")
 config.write_text(data)
 
 manifest = root / "AndroidManifest.xml"
@@ -144,4 +144,4 @@ data = replace_once(
     "Aniyomi library metadata",
 )
 manifest.write_text(data)
-print("Patched RedeToons to 1000-9")
+print("Patched RedeToons to 1000-10")
