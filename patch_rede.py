@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the RedeToons 1000-10 changes to an Apktool decoded 14.2 APK.
+"""Apply the RedeToons 1000-11 changes to an Apktool decoded 14.2 APK.
 
 Usage: python patch_rede.py PATH_TO_APKTOOL_DECODED_DIRECTORY
 """
@@ -126,12 +126,205 @@ legacy_video_methods = '''.method protected videoListRequest(Leu/kanade/tachiyom
 
 '''
 data = data.replace(method, legacy_video_methods + method, 1)
+
+# Use the same per-source preferences as the existing content filter. The
+# playable API paths are built from getBaseUrl(), so a single origin setting
+# covers catalog, episodes, playback, and request headers.
+old_base_url = '''.method public getBaseUrl()Ljava/lang/String;
+    .locals 0
+
+    .line 1
+    iget-object p0, p0, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->b:Ljava/lang/String;
+
+    .line 2
+    .line 3
+    return-object p0
+.end method'''
+new_base_url = '''.method public getBaseUrl()Ljava/lang/String;
+    .locals 3
+
+    invoke-direct {p0}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->k()Landroid/content/SharedPreferences;
+    move-result-object v0
+
+    const-string v1, "domain_override"
+    const-string v2, ""
+    invoke-interface {v0, v1, v2}, Landroid/content/SharedPreferences;->getString(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+    move-result-object v0
+
+    invoke-static {v0}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->normalizeDomain(Ljava/lang/String;)Ljava/lang/String;
+    move-result-object v0
+
+    if-eqz v0, :default_domain
+    return-object v0
+
+    :default_domain
+    iget-object v0, p0, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->b:Ljava/lang/String;
+    return-object v0
+.end method
+
+.method public static normalizeDomain(Ljava/lang/String;)Ljava/lang/String;
+    .locals 2
+
+    if-eqz p0, :invalid
+    invoke-virtual {p0}, Ljava/lang/String;->trim()Ljava/lang/String;
+    move-result-object p0
+
+    const-string v0, "(?i)/browse/?$"
+    const-string v1, ""
+    invoke-virtual {p0, v0, v1}, Ljava/lang/String;->replaceFirst(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+    move-result-object p0
+
+    const-string v0, "/$"
+    invoke-virtual {p0, v0, v1}, Ljava/lang/String;->replaceFirst(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+    move-result-object p0
+
+    const-string v0, "https://[A-Za-z0-9.-]+(:[0-9]{1,5})?"
+    invoke-virtual {p0, v0}, Ljava/lang/String;->matches(Ljava/lang/String;)Z
+    move-result v0
+    if-eqz v0, :invalid
+    return-object p0
+
+    :invalid
+    const/4 v0, 0x0
+    return-object v0
+.end method
+
+.method public saveDomain(Ljava/lang/String;)Z
+    .locals 3
+
+    invoke-virtual {p1}, Ljava/lang/String;->trim()Ljava/lang/String;
+    move-result-object p1
+    invoke-virtual {p1}, Ljava/lang/String;->isEmpty()Z
+    move-result v0
+    if-nez v0, :store
+
+    invoke-static {p1}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->normalizeDomain(Ljava/lang/String;)Ljava/lang/String;
+    move-result-object p1
+    if-eqz p1, :invalid
+
+    :store
+    invoke-direct {p0}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->k()Landroid/content/SharedPreferences;
+    move-result-object v0
+    invoke-interface {v0}, Landroid/content/SharedPreferences;->edit()Landroid/content/SharedPreferences$Editor;
+    move-result-object v0
+    const-string v1, "domain_override"
+    invoke-interface {v0, v1, p1}, Landroid/content/SharedPreferences$Editor;->putString(Ljava/lang/String;Ljava/lang/String;)Landroid/content/SharedPreferences$Editor;
+    move-result-object v0
+    invoke-interface {v0}, Landroid/content/SharedPreferences$Editor;->apply()V
+    const/4 v0, 0x1
+    return v0
+
+    :invalid
+    const/4 v0, 0x0
+    return v0
+.end method'''
+data = replace_once(data, old_base_url, new_base_url, "configurable domain")
+
+browser_client = '''.method public getClient()Lokhttp3/OkHttpClient;
+    .locals 4
+
+    invoke-super {p0}, Leu/kanade/tachiyomi/animesource/online/AnimeHttpSource;->getClient()Lokhttp3/OkHttpClient;
+    move-result-object v0
+    invoke-virtual {v0}, Lokhttp3/OkHttpClient;->newBuilder()Lokhttp3/OkHttpClient$Builder;
+    move-result-object v0
+    new-instance v1, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeBrowserInterceptor;
+    invoke-static {}, Lkeiyoushi/utils/a;->a()Landroid/app/Application;
+    move-result-object v2
+    invoke-virtual {p0}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->getBaseUrl()Ljava/lang/String;
+    move-result-object v3
+    invoke-direct {v1, v2, v3}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeBrowserInterceptor;-><init>(Landroid/content/Context;Ljava/lang/String;)V
+    invoke-virtual {v0, v1}, Lokhttp3/OkHttpClient$Builder;->addInterceptor(Lokhttp3/Interceptor;)Lokhttp3/OkHttpClient$Builder;
+    move-result-object v0
+    invoke-virtual {v0}, Lokhttp3/OkHttpClient$Builder;->build()Lokhttp3/OkHttpClient;
+    move-result-object v0
+    return-object v0
+.end method
+
+'''
+data = replace_once(data, '.method public getFilterList()Leu/kanade/tachiyomi/animesource/model/AnimeFilterList;',
+                    browser_client + '.method public getFilterList()Leu/kanade/tachiyomi/animesource/model/AnimeFilterList;',
+                    "browser-backed play-link client")
+
+old_pref_end = '''    invoke-virtual {p1, v0}, Landroidx/preference/PreferenceScreen;->addPreference(Landroidx/preference/Preference;)Z
+
+    .line 147
+    .line 148
+    .line 149
+    return-void
+.end method'''
+new_pref_end = '''    invoke-virtual {p1, v0}, Landroidx/preference/PreferenceScreen;->addPreference(Landroidx/preference/Preference;)Z
+
+    new-instance v0, Landroidx/preference/EditTextPreference;
+    invoke-virtual {p1}, Landroidx/preference/PreferenceScreen;->getContext()Landroid/content/Context;
+    move-result-object v1
+    invoke-direct {v0, v1}, Landroidx/preference/EditTextPreference;-><init>(Landroid/content/Context;)V
+    const-string v1, "domain_override"
+    invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setKey(Ljava/lang/String;)V
+    const-string v1, "Domínio do site"
+    invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setTitle(Ljava/lang/CharSequence;)V
+    const-string v1, "URL HTTPS do site; /browse é opcional. Em branco: redetoons.bond"
+    invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setSummary(Ljava/lang/CharSequence;)V
+    const/4 v1, 0x0
+    invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setPersistent(Z)V
+    invoke-direct {p0}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->k()Landroid/content/SharedPreferences;
+    move-result-object v1
+    const-string v2, "domain_override"
+    const-string v3, ""
+    invoke-interface {v1, v2, v3}, Landroid/content/SharedPreferences;->getString(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+    move-result-object v1
+    invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setText(Ljava/lang/String;)V
+    new-instance v1, Leu/kanade/tachiyomi/animeextension/pt/redetoons/DomainPreferenceListener;
+    invoke-direct {v1, p0}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/DomainPreferenceListener;-><init>(Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;)V
+    invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setOnPreferenceChangeListener(Landroidx/preference/Preference$OnPreferenceChangeListener;)V
+    invoke-virtual {p1, v0}, Landroidx/preference/PreferenceScreen;->addPreference(Landroidx/preference/Preference;)Z
+
+    return-void
+.end method'''
+data = replace_once(data, old_pref_end, new_pref_end, "domain preference")
+data = replace_once(data, '.method public setupPreferenceScreen(Landroidx/preference/PreferenceScreen;)V\n    .locals 5',
+                    '.method public setupPreferenceScreen(Landroidx/preference/PreferenceScreen;)V\n    .locals 6', "preference registers")
 source.write_text(data)
+
+listener = root / "smali/eu/kanade/tachiyomi/animeextension/pt/redetoons/DomainPreferenceListener.smali"
+listener.write_text('''.class public final Leu/kanade/tachiyomi/animeextension/pt/redetoons/DomainPreferenceListener;
+.super Ljava/lang/Object;
+.implements Landroidx/preference/Preference$OnPreferenceChangeListener;
+
+.field private final source:Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;
+
+.method public constructor <init>(Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;)V
+    .locals 0
+    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
+    iput-object p1, p0, Leu/kanade/tachiyomi/animeextension/pt/redetoons/DomainPreferenceListener;->source:Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;
+    return-void
+.end method
+
+.method public onPreferenceChange(Landroidx/preference/Preference;Ljava/lang/Object;)Z
+    .locals 3
+    check-cast p2, Ljava/lang/String;
+    iget-object v0, p0, Leu/kanade/tachiyomi/animeextension/pt/redetoons/DomainPreferenceListener;->source:Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;
+    invoke-virtual {v0, p2}, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons;->saveDomain(Ljava/lang/String;)Z
+    move-result v0
+    if-nez v0, :done
+    invoke-virtual {p1}, Landroidx/preference/Preference;->getContext()Landroid/content/Context;
+    move-result-object v1
+    const-string v2, "Use uma URL HTTPS válida, com ou sem /browse"
+    const/4 p0, 0x0
+    invoke-static {v1, v2, p0}, Landroid/widget/Toast;->makeText(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;
+    move-result-object v1
+    invoke-virtual {v1}, Landroid/widget/Toast;->show()V
+    :done
+    return v0
+.end method
+''')
+
+for name in ("RedeBrowserInterceptor.smali", "RedeBrowserFetcher.smali"):
+    (source.parent / name).write_text((Path(__file__).parent / "smali-patches" / name).read_text())
 
 config = root / "apktool.yml"
 data = config.read_text()
 data = replace_once(data, "  versionCode: 2\n  versionName: 14.2",
-                    "  versionCode: 1000010\n  versionName: 14.1000-10", "version")
+                    "  versionCode: 1000011\n  versionName: 14.1000-11", "version")
 config.write_text(data)
 
 manifest = root / "AndroidManifest.xml"
@@ -144,4 +337,4 @@ data = replace_once(
     "Aniyomi library metadata",
 )
 manifest.write_text(data)
-print("Patched RedeToons to 1000-10")
+print("Patched RedeToons to 1000-11")
