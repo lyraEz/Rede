@@ -5,12 +5,12 @@
     {
       "name": "RedeToons",
       "packageName": "eu.kanade.tachiyomi.animeextension.pt.redetoons",
-      "apk": "aniyomi-pt.redetoons-v1000-10.apk",
+      "apk": "aniyomi-pt.redetoons-v1000-11.apk",
       "icon": "eu.kanade.tachiyomi.animeextension.pt.redetoons.png",
       "lang": "pt-BR",
       "extensionLib": 14,
-      "versionCode": 1000010,
-      "versionName": "14.1000-10",
+      "versionCode": 1000011,
+      "versionName": "14.1000-11",
       "sourceId": "5791416117185453153",
       "baseUrl": "https://redetoons.bond",
       "contentWarning": "SAFE"
