@@ -22,9 +22,9 @@ Depois de adicionar a loja, atualize a lista de extensões no aplicativo.
 
 | Extensão | Versão | Site |
 | --- | --- | --- |
-| [RedeToons](https://raw.githubusercontent.com/lyraEz/Rede/repo/apk/aniyomi-pt.redetoons-v1000-11.apk) | 1000-11 | [redetoons.bond](https://redetoons.bond/browse) |
+| [RedeToons](https://raw.githubusercontent.com/lyraEz/Rede/repo/apk/aniyomi-pt.redetoons-v1000-12.apk) | 1000-12 | [redetoons.beer](https://redetoons.beer/browse) |
 
-A RedeToons corrige o APK da extensão publicado pela [Awerkori](https://github.com/Awerkori/anime-extensoes). As versões anteriores estão preservadas nas tags [1000-7](https://github.com/lyraEz/Rede/tree/redetoons-v1000-7), [1000-8](https://github.com/lyraEz/Rede/tree/redetoons-v1000-8), [1000-9](https://github.com/lyraEz/Rede/tree/redetoons-v1000-9) e [1000-10](https://github.com/lyraEz/Rede/tree/redetoons-v1000-10).
+A RedeToons corrige o APK da extensão publicado pela [Awerkori](https://github.com/Awerkori/anime-extensoes). As versões anteriores estão preservadas nas tags [1000-7](https://github.com/lyraEz/Rede/tree/redetoons-v1000-7), [1000-8](https://github.com/lyraEz/Rede/tree/redetoons-v1000-8), [1000-9](https://github.com/lyraEz/Rede/tree/redetoons-v1000-9), [1000-10](https://github.com/lyraEz/Rede/tree/redetoons-v1000-10) e [1000-11](https://github.com/lyraEz/Rede/tree/redetoons-v1000-11).
 
 Quem já usa o endereço da loja com `store-v2-1000-7.json` pode mantê-lo; ele também recebe as versões novas.
 

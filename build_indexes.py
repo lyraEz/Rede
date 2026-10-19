@@ -83,7 +83,7 @@ def write(name, data, compact=False):
         json.dumps(data, ensure_ascii=False, separators=(",", ":") if compact else None, indent=None if compact else 2) + "\n"
     )
 
-for name in ("store-v2.json", "store-v2-1000-7.json", "store-v2-1000-8.json", "store-v2-1000-9.json", "store-v2-1000-10.json", "store-v2-1000-11.json", "store.json"):
+for name in ("store-v2.json", "store-v2-1000-7.json", "store-v2-1000-8.json", "store-v2-1000-9.json", "store-v2-1000-10.json", "store-v2-1000-11.json", "store-v2-1000-12.json", "store.json"):
     write(name, modern)
 write("repo.json", repo)
 write("index.json", legacy_extensions)
