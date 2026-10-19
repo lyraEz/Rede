@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the RedeToons 1000-11 changes to an Apktool decoded 14.2 APK.
+"""Apply the RedeToons 1000-12 changes to an Apktool decoded 14.2 APK.
 
 Usage: python patch_rede.py PATH_TO_APKTOOL_DECODED_DIRECTORY
 """
@@ -19,7 +19,7 @@ root = Path(sys.argv[1])
 source = root / "smali/eu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons.smali"
 data = source.read_text()
 data = replace_once(data, 'const-string v0, "https://redetoons.win"',
-                    'const-string v0, "https://redetoons.bond"', "base URL")
+                    'const-string v0, "https://redetoons.beer"', "base URL")
 
 old_catalog_poster = '''    if-eqz p1, :cond_2
 
@@ -178,6 +178,14 @@ new_base_url = '''.method public getBaseUrl()Ljava/lang/String;
     invoke-virtual {p0, v0, v1}, Ljava/lang/String;->replaceFirst(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
     move-result-object p0
 
+    const-string v0, "https://redetoons.bond"
+    invoke-virtual {v0, p0}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
+    move-result v0
+    if-eqz v0, :validate
+    const-string p0, "https://redetoons.beer"
+    return-object p0
+
+    :validate
     const-string v0, "https://[A-Za-z0-9.-]+(:[0-9]{1,5})?"
     invoke-virtual {p0, v0}, Ljava/lang/String;->matches(Ljava/lang/String;)Z
     move-result v0
@@ -262,7 +270,7 @@ new_pref_end = '''    invoke-virtual {p1, v0}, Landroidx/preference/PreferenceSc
     invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setKey(Ljava/lang/String;)V
     const-string v1, "Domínio do site"
     invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setTitle(Ljava/lang/CharSequence;)V
-    const-string v1, "URL HTTPS do site; /browse é opcional. Em branco: redetoons.bond"
+    const-string v1, "URL HTTPS do site; /browse é opcional. Em branco: redetoons.beer"
     invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setSummary(Ljava/lang/CharSequence;)V
     const/4 v1, 0x0
     invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setPersistent(Z)V
@@ -324,7 +332,7 @@ for name in ("RedeBrowserInterceptor.smali", "RedeBrowserFetcher.smali"):
 config = root / "apktool.yml"
 data = config.read_text()
 data = replace_once(data, "  versionCode: 2\n  versionName: 14.2",
-                    "  versionCode: 1000011\n  versionName: 14.1000-11", "version")
+                    "  versionCode: 1000012\n  versionName: 14.1000-12", "version")
 config.write_text(data)
 
 manifest = root / "AndroidManifest.xml"
@@ -337,4 +345,4 @@ data = replace_once(
     "Aniyomi library metadata",
 )
 manifest.write_text(data)
-print("Patched RedeToons to 1000-11")
+print("Patched RedeToons to 1000-12")
