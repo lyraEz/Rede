@@ -589,13 +589,12 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
 
         PlayResult result = fetchPlay(titleId, params, watchPath);
         if (result.videos != null && !result.videos.isEmpty()) return result.videos;
-        if ("parametros".equals(result.error)) {
-            throw new RuntimeException("O site recusou o pedido deste filme. Ele ainda não é suportado pela extensão.");
-        }
 
-        // The site wants a login or a fresh security check: do both in a hidden browser.
         String user = preferences().getString(PREF_USER, "");
         String pass = preferences().getString(PREF_PASS, "");
+        if (m.group(2) == null) return movieFromPlayer(watchPath, user, pass);
+
+        // The site wants a login or a fresh security check: do both in a hidden browser.
         RedeBrowser.Result browser = RedeBrowser.unlock(appContext(), getBaseUrl() + watchPath,
                 getHeaders().get("User-Agent"), user, pass);
         if (browser == RedeBrowser.Result.NEEDS_LOGIN) {
@@ -608,6 +607,32 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         result = fetchPlay(titleId, params, watchPath);
         if (result.videos != null && !result.videos.isEmpty()) return result.videos;
         throw new RuntimeException(errorMessage(result.error, browser, user.isEmpty() || pass.isEmpty()));
+    }
+
+    /**
+     * The watch API does not serve movies, so play the movie page in the hidden
+     * browser and take the video file its player requests.
+     */
+    private List<Video> movieFromPlayer(String watchPath, String user, String pass) {
+        RedeBrowser.Capture capture = RedeBrowser.captureVideo(appContext(), getBaseUrl() + watchPath,
+                getHeaders().get("User-Agent"), user, pass);
+        if (capture.url != null) {
+            Headers videoHeaders = new Headers.Builder()
+                    .set("Referer", getBaseUrl() + "/")
+                    .set("Origin", getBaseUrl())
+                    .build();
+            List<Video> videos = new ArrayList<>();
+            videos.add(new Video(capture.url, "RedeToons", capture.url, videoHeaders, null, null, 0x30, null));
+            return videos;
+        }
+        switch (capture.result) {
+            case NEEDS_LOGIN:
+                throw new RuntimeException("Para assistir, coloque o e-mail e a senha da sua conta RedeToons nas configurações da extensão.");
+            case LOGIN_REJECTED:
+                throw new RuntimeException("O site recusou o login. Confira o e-mail e a senha nas configurações da extensão.");
+            default:
+                throw new RuntimeException("O player do site não entregou o vídeo deste filme a tempo. Tente de novo.");
+        }
     }
 
     private static String errorMessage(String error, RedeBrowser.Result browser, boolean noAccount) {
