@@ -18,7 +18,11 @@ https://raw.githubusercontent.com/lyraEz/Rede/repo/index.min.json
 
 Depois de adicionar a loja, atualize a lista de extensões no aplicativo.
 
-> **Atenção para a versão 1000-13:** a chave de assinatura foi renovada. Para instalar esta versão, desinstale a RedeToons 1000-12 ou anterior e depois instale novamente pela loja. Esse procedimento é necessário somente nesta troca de chave.
+> **Atenção para a versão 1000-13:** a chave de assinatura foi renovada. Esse procedimento é necessário somente nesta troca de chave:
+>
+> 1. Desinstale a RedeToons 1000-12 ou anterior.
+> 2. Remova a loja Rede do aplicativo e adicione o endereço novamente. O aplicativo guarda a chave da loja no momento em que ela é adicionada e não aceita a troca ao atualizar a lista; sem esse passo, a extensão instalada não é reconhecida e o botão **Instalar** continua aparecendo.
+> 3. Atualize a lista de extensões e instale a RedeToons. Se ela aparecer como não confiável, toque em **Confiar**.
 
 ## Extensões
 
