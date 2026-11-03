@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the RedeToons 1000-12 changes to an Apktool decoded 14.2 APK.
+"""Apply the RedeToons 1000-13 changes to an Apktool decoded 14.2 APK.
 
 Usage: python patch_rede.py PATH_TO_APKTOOL_DECODED_DIRECTORY
 """
@@ -19,7 +19,7 @@ root = Path(sys.argv[1])
 source = root / "smali/eu/kanade/tachiyomi/animeextension/pt/redetoons/RedeToons.smali"
 data = source.read_text()
 data = replace_once(data, 'const-string v0, "https://redetoons.win"',
-                    'const-string v0, "https://redetoons.beer"', "base URL")
+                    'const-string v0, "https://redetoons.watch"', "base URL")
 
 old_catalog_poster = '''    if-eqz p1, :cond_2
 
@@ -169,20 +169,16 @@ new_base_url = '''.method public getBaseUrl()Ljava/lang/String;
     invoke-virtual {p0}, Ljava/lang/String;->trim()Ljava/lang/String;
     move-result-object p0
 
-    const-string v0, "(?i)/browse/?$"
-    const-string v1, ""
+    const-string v0, "(?i)^(https://[A-Za-z0-9.-]+(:[0-9]{1,5})?)(/.*)?$"
+    const-string v1, "$1"
     invoke-virtual {p0, v0, v1}, Ljava/lang/String;->replaceFirst(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
     move-result-object p0
 
-    const-string v0, "/$"
-    invoke-virtual {p0, v0, v1}, Ljava/lang/String;->replaceFirst(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
-    move-result-object p0
-
-    const-string v0, "https://redetoons.bond"
-    invoke-virtual {v0, p0}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
+    const-string v0, "https://redetoons[.](bond|beer|one)"
+    invoke-virtual {p0, v0}, Ljava/lang/String;->matches(Ljava/lang/String;)Z
     move-result v0
     if-eqz v0, :validate
-    const-string p0, "https://redetoons.beer"
+    const-string p0, "https://redetoons.watch"
     return-object p0
 
     :validate
@@ -270,7 +266,7 @@ new_pref_end = '''    invoke-virtual {p1, v0}, Landroidx/preference/PreferenceSc
     invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setKey(Ljava/lang/String;)V
     const-string v1, "Domínio do site"
     invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setTitle(Ljava/lang/CharSequence;)V
-    const-string v1, "URL HTTPS do site; /browse é opcional. Em branco: redetoons.beer"
+    const-string v1, "URL HTTPS do site; caminhos como /br são opcionais. Em branco: redetoons.watch"
     invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setSummary(Ljava/lang/CharSequence;)V
     const/4 v1, 0x0
     invoke-virtual {v0, v1}, Landroidx/preference/EditTextPreference;->setPersistent(Z)V
@@ -316,7 +312,7 @@ listener.write_text('''.class public final Leu/kanade/tachiyomi/animeextension/p
     if-nez v0, :done
     invoke-virtual {p1}, Landroidx/preference/Preference;->getContext()Landroid/content/Context;
     move-result-object v1
-    const-string v2, "Use uma URL HTTPS válida, com ou sem /browse"
+    const-string v2, "Use uma URL HTTPS válida, com ou sem caminho"
     const/4 p0, 0x0
     invoke-static {v1, v2, p0}, Landroid/widget/Toast;->makeText(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;
     move-result-object v1
@@ -332,7 +328,7 @@ for name in ("RedeBrowserInterceptor.smali", "RedeBrowserFetcher.smali"):
 config = root / "apktool.yml"
 data = config.read_text()
 data = replace_once(data, "  versionCode: 2\n  versionName: 14.2",
-                    "  versionCode: 1000012\n  versionName: 14.1000-12", "version")
+                    "  versionCode: 1000013\n  versionName: 14.1000-13", "version")
 config.write_text(data)
 
 manifest = root / "AndroidManifest.xml"
@@ -345,4 +341,4 @@ data = replace_once(
     "Aniyomi library metadata",
 )
 manifest.write_text(data)
-print("Patched RedeToons to 1000-12")
+print("Patched RedeToons to 1000-13")

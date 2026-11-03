@@ -97,7 +97,7 @@
     invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
     iget-object v2, p0, Leu/kanade/tachiyomi/animeextension/pt/redetoons/RedeBrowserFetcher;->baseUrl:Ljava/lang/String;
     invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
-    const-string v2, "/browse"
+    const-string v2, "/"
     invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
     invoke-virtual {v1}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
     move-result-object v1
@@ -128,10 +128,10 @@
     move-result-object v0
     new-instance v1, Ljava/lang/StringBuilder;
     invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
-    const-string v2, "(function(){fetch("
+    const-string v2, "(function(){var u=new URL("
     invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
     invoke-virtual {v1, v0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
-    const-string v2, ",{credentials:'include',cache:'no-store',headers:{Accept:'application/json'}}).then(function(r){return r.text().then(function(t){RedeBridge.done(r.status,t)})}).catch(function(e){RedeBridge.done(0,String(e))})})()"
+    const-string v2, ");var target=location.origin+u.pathname+u.search;fetch(target,{credentials:'include',cache:'no-store',headers:{Accept:'application/json'}}).then(function(r){return r.text().then(function(t){RedeBridge.done(r.status,t)})}).catch(function(e){RedeBridge.done(0,String(e))})})()"
     invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
     invoke-virtual {v1}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
     move-result-object v1
