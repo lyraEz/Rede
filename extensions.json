@@ -1,16 +1,16 @@
 {
   "storeName": "Rede",
-  "signingKey": "8e47b134fe2f1b75d64cb8b5ac694242d4bc050928079f30e4f239ac8401f780",
+  "signingKey": "591ad45499955a7380d53c627e8f96128a53aec00020f154de917ab7b8e896e3",
   "extensions": [
     {
       "name": "RedeToons",
       "packageName": "eu.kanade.tachiyomi.animeextension.pt.redetoons",
-      "apk": "aniyomi-pt.redetoons-v1000-13.apk",
+      "apk": "aniyomi-pt.redetoons-v1000-14.apk",
       "icon": "eu.kanade.tachiyomi.animeextension.pt.redetoons.png",
       "lang": "pt-BR",
       "extensionLib": 14,
-      "versionCode": 1000013,
-      "versionName": "14.1000-13",
+      "versionCode": 1000014,
+      "versionName": "14.1000-14",
       "sourceId": "5791416117185453153",
       "baseUrl": "https://redetoons.watch",
       "contentWarning": "SAFE"
