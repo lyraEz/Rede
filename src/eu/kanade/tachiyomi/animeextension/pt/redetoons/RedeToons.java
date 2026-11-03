@@ -45,6 +45,8 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
     private static final String DEFAULT_BASE_URL = "https://redetoons.watch";
     private static final String LOCALE = "/br";
     private static final String PREF_DOMAIN = "domain_override";
+    private static final String PREF_USER = "account_user";
+    private static final String PREF_PASS = "account_password";
 
     // Search pages send an empty su-page-data first and the results later in su-final-page.
     private static final Pattern FINAL_PAGE_DATA = Pattern.compile(
@@ -115,6 +117,32 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
             }
         });
         screen.addPreference(domain);
+
+        screen.addPreference(accountPreference(screen, PREF_USER, "E-mail ou usuário da RedeToons",
+                "Usado para entrar automaticamente quando o site pedir login", false));
+        screen.addPreference(accountPreference(screen, PREF_PASS, "Senha da RedeToons",
+                "Fica salva só neste aparelho", true));
+    }
+
+    private EditTextPreference accountPreference(PreferenceScreen screen, final String key, String title,
+                                                 final String summary, final boolean secret) {
+        final EditTextPreference pref = new EditTextPreference(screen.getContext());
+        pref.setKey(key);
+        pref.setTitle(title);
+        pref.setPersistent(false);
+        String current = preferences().getString(key, "");
+        pref.setText(current);
+        pref.setSummary(current.isEmpty() ? summary : secret ? "••••••" : current);
+        pref.setOnPreferenceChangeListener(new Preference.OnPreferenceChangeListener() {
+            @Override
+            public boolean onPreferenceChange(Preference p, Object newValue) {
+                String value = String.valueOf(newValue).trim();
+                preferences().edit().putString(key, value).apply();
+                pref.setSummary(value.isEmpty() ? summary : secret ? "••••••" : value);
+                return true;
+            }
+        });
+        return pref;
     }
 
     // --------------------------------------------------------------- helpers
@@ -455,15 +483,20 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
 
     // ---------------------------------------------------------------- videos
 
+    /**
+     * The app fails on any non-2xx answer before parsing, and the watch page or the
+     * API may answer with one when a login or security check is due. So request a
+     * small static file that always loads, carry the episode path along, and make
+     * the API calls in parseVideos.
+     */
     private Request playRequest(SEpisode episode) {
-        Matcher m = WATCH_URL.matcher(episode.getUrl());
-        if (!m.find()) {
+        if (!WATCH_URL.matcher(episode.getUrl()).find()) {
             throw new RuntimeException("Episódio salvo por uma versão antiga. Atualize a lista de episódios.");
         }
-        // Movies have no episode id. The API rejects them without one, so load the
-        // watch page and try the movie parameters in parseVideos.
-        if (m.group(2) == null) return get(getBaseUrl() + LOCALE + "/watch/" + m.group(1));
-        return apiRequest(m.group(1), "e=" + m.group(2), episode.getUrl());
+        okhttp3.HttpUrl url = okhttp3.HttpUrl.get(getBaseUrl() + "/favicon.ico").newBuilder()
+                .addQueryParameter("rt", episode.getUrl())
+                .build();
+        return get(url.toString());
     }
 
     private Request apiRequest(String titleId, String episodeParam, String watchPath) {
@@ -476,28 +509,40 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         return new Request.Builder().url(url).headers(headers).build();
     }
 
-    private List<Video> movieVideos(Response watchPage) {
-        String path = watchPage.request().url().encodedPath();
-        Matcher m = WATCH_URL.matcher(path);
-        body(watchPage);
-        if (!m.find()) throw new RuntimeException("Filme não encontrado no site.");
-        String titleId = m.group(1);
-        RuntimeException last = null;
-        for (String param : new String[] {"e=0", "e=" + titleId, ""}) {
-            try (Response response = getClient().newCall(apiRequest(titleId, param, path)).execute()) {
-                return videosFromApi(response.code(), response.body().string());
+    /** Videos, or the API error that stopped them. */
+    private static final class PlayResult {
+        List<Video> videos;
+        String error = "";
+    }
+
+    private PlayResult fetchPlay(String titleId, String[] params, String watchPath) {
+        PlayResult result = new PlayResult();
+        for (String param : params) {
+            String text;
+            try (Response response = getClient().newCall(apiRequest(titleId, param, watchPath)).execute()) {
+                text = response.body().string();
             } catch (IOException e) {
-                last = new RuntimeException(e);
-            } catch (RuntimeException e) {
-                last = e;
-                // Only keep trying while the site complains about the parameters.
-                if (e.getMessage() == null || !e.getMessage().contains("parametros")) throw e;
+                result.error = "rede";
+                continue;
             }
+            JSONObject json;
+            try {
+                json = new JSONObject(text.trim());
+            } catch (JSONException e) {
+                result.error = "verificacao";
+                return result;
+            }
+            String error = json.optString("error", "");
+            if (error.isEmpty()) {
+                result.videos = videosFrom(json.optJSONObject("play"));
+                if (result.videos.isEmpty()) result.error = "sem_video";
+                return result;
+            }
+            result.error = error;
+            // Movies: keep trying while the site rejects the parameters.
+            if (!"parametros".equals(error)) return result;
         }
-        if (last.getMessage() != null && last.getMessage().contains("parametros")) {
-            throw new RuntimeException("O site recusou o pedido deste filme. Ele ainda não é suportado pela extensão.");
-        }
-        throw last;
+        return result;
     }
 
     @Override
@@ -531,32 +576,70 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
     }
 
     private List<Video> parseVideos(Response response) {
-        if (!response.request().url().encodedPath().startsWith("/api/")) return movieVideos(response);
-        return videosFromApi(response.code(), body(response));
+        String watchPath = response.request().url().queryParameter("rt");
+        response.close();
+        if (watchPath == null) throw new RuntimeException("Episódio não encontrado no site.");
+        Matcher m = WATCH_URL.matcher(watchPath);
+        if (!m.find()) throw new RuntimeException("Episódio não encontrado no site.");
+        String titleId = m.group(1);
+        // Movies have no episode id; the site has accepted e={title id} for them.
+        String[] params = m.group(2) != null
+                ? new String[] {"e=" + m.group(2)}
+                : new String[] {"e=" + titleId, "e=0", ""};
+
+        PlayResult result = fetchPlay(titleId, params, watchPath);
+        if (result.videos != null && !result.videos.isEmpty()) return result.videos;
+        if ("parametros".equals(result.error)) {
+            throw new RuntimeException("O site recusou o pedido deste filme. Ele ainda não é suportado pela extensão.");
+        }
+
+        // The site wants a login or a fresh security check: do both in a hidden browser.
+        String user = preferences().getString(PREF_USER, "");
+        String pass = preferences().getString(PREF_PASS, "");
+        RedeBrowser.Result browser = RedeBrowser.unlock(appContext(), getBaseUrl() + watchPath,
+                getHeaders().get("User-Agent"), user, pass);
+        if (browser == RedeBrowser.Result.NEEDS_LOGIN) {
+            throw new RuntimeException("Para assistir, coloque o e-mail e a senha da sua conta RedeToons nas configurações da extensão.");
+        }
+        if (browser == RedeBrowser.Result.LOGIN_REJECTED) {
+            throw new RuntimeException("O site recusou o login. Confira o e-mail e a senha nas configurações da extensão.");
+        }
+
+        result = fetchPlay(titleId, params, watchPath);
+        if (result.videos != null && !result.videos.isEmpty()) return result.videos;
+        throw new RuntimeException(errorMessage(result.error, browser, user.isEmpty() || pass.isEmpty()));
     }
 
-    private List<Video> videosFromApi(int code, String text) {
-        JSONObject json;
-        try {
-            json = new JSONObject(text.trim());
-        } catch (JSONException e) {
-            throw new RuntimeException(needsWebView(code));
+    private static String errorMessage(String error, RedeBrowser.Result browser, boolean noAccount) {
+        switch (error) {
+            case "login":
+                return noAccount
+                        ? "Para assistir, coloque o e-mail e a senha da sua conta RedeToons nas configurações da extensão."
+                        : "Não foi possível entrar na sua conta. Confira o e-mail e a senha nas configurações da extensão.";
+            case "indisponivel":
+                return browser == RedeBrowser.Result.TIMEOUT
+                        ? "O site não liberou este vídeo: a verificação de segurança não terminou a tempo. Tente de novo."
+                        : "Este título não está disponível para assistir no site agora.";
+            case "verificacao":
+                return "A verificação de segurança do site não foi concluída. Tente de novo em alguns segundos.";
+            case "parametros":
+                return "O site recusou o pedido deste filme. Ele ainda não é suportado pela extensão.";
+            case "rede":
+                return "Sem conexão com o site.";
+            case "sem_video":
+                return "Nenhum vídeo disponível para este episódio.";
+            default:
+                return "O site não liberou o vídeo (" + error + ").";
         }
-        String error = json.optString("error", "");
-        if (!error.isEmpty()) {
-            if ("login".equals(error)) {
-                throw new RuntimeException("Entre na sua conta da RedeToons pelo WebView e tente de novo.");
-            }
-            throw new RuntimeException(needsWebView(code) + " (" + error + ")");
-        }
-        JSONObject play = json.optJSONObject("play");
-        if (play == null) throw new RuntimeException(needsWebView(code));
+    }
 
+    private List<Video> videosFrom(JSONObject play) {
+        List<Video> videos = new ArrayList<>();
+        if (play == null) return videos;
         Headers videoHeaders = new Headers.Builder()
                 .set("Referer", getBaseUrl() + "/")
                 .set("Origin", getBaseUrl())
                 .build();
-        List<Video> videos = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         JSONArray sources = play.optJSONArray("sources");
         if (sources != null) for (int i = 0; i < sources.length(); i++) {
@@ -571,12 +654,6 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         if (!src.isEmpty() && seen.add(src)) {
             videos.add(new Video(src, "RedeToons", src, videoHeaders, null, null, 0x30, null));
         }
-        if (videos.isEmpty()) throw new RuntimeException("Nenhum vídeo disponível para este episódio.");
         return videos;
-    }
-
-    private static String needsWebView(int code) {
-        if (code == 401) return "Entre na sua conta da RedeToons pelo WebView e tente de novo.";
-        return "Abra o episódio no WebView, conclua a verificação de segurança e tente de novo.";
     }
 }
