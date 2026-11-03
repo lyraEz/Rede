@@ -46,6 +46,9 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
     private static final String LOCALE = "/br";
     private static final String PREF_DOMAIN = "domain_override";
 
+    // Search pages send an empty su-page-data first and the results later in su-final-page.
+    private static final Pattern FINAL_PAGE_DATA = Pattern.compile(
+            "<script[^>]*id=\"su-final-page\"[^>]*>(.*?)</script>", Pattern.DOTALL);
     private static final Pattern PAGE_DATA = Pattern.compile(
             "<script[^>]*id=\"su-page-data\"[^>]*>(.*?)</script>", Pattern.DOTALL);
     private static final Pattern DATA_PAGE_ATTR = Pattern.compile("data-page=\"([^\"]*)\"");
@@ -143,7 +146,9 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
                 JSONObject json = new JSONObject(trimmed);
                 return json.has("props") ? json.getJSONObject("props") : json;
             }
-            Matcher m = PAGE_DATA.matcher(html);
+            Matcher m = FINAL_PAGE_DATA.matcher(html);
+            if (m.find()) return new JSONObject(m.group(1)).getJSONObject("props");
+            m = PAGE_DATA.matcher(html);
             if (m.find()) return new JSONObject(m.group(1)).getJSONObject("props");
             m = DATA_PAGE_ATTR.matcher(html);
             if (m.find()) return new JSONObject(unescapeHtml(m.group(1))).getJSONObject("props");
@@ -455,13 +460,44 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         if (!m.find()) {
             throw new RuntimeException("Episódio salvo por uma versão antiga. Atualize a lista de episódios.");
         }
-        String url = getBaseUrl() + "/api/watch/" + m.group(1) + "/next?"
-                + (m.group(2) != null ? "e=" + m.group(2) + "&" : "") + "lang=br";
+        // Movies have no episode id. The API rejects them without one, so load the
+        // watch page and try the movie parameters in parseVideos.
+        if (m.group(2) == null) return get(getBaseUrl() + LOCALE + "/watch/" + m.group(1));
+        return apiRequest(m.group(1), "e=" + m.group(2), episode.getUrl());
+    }
+
+    private Request apiRequest(String titleId, String episodeParam, String watchPath) {
+        String url = getBaseUrl() + "/api/watch/" + titleId + "/next?"
+                + (episodeParam.isEmpty() ? "" : episodeParam + "&") + "lang=br";
         Headers headers = getHeaders().newBuilder()
                 .set("Accept", "application/json")
-                .set("Referer", getBaseUrl() + episode.getUrl())
+                .set("Referer", getBaseUrl() + watchPath)
                 .build();
         return new Request.Builder().url(url).headers(headers).build();
+    }
+
+    private List<Video> movieVideos(Response watchPage) {
+        String path = watchPage.request().url().encodedPath();
+        Matcher m = WATCH_URL.matcher(path);
+        body(watchPage);
+        if (!m.find()) throw new RuntimeException("Filme não encontrado no site.");
+        String titleId = m.group(1);
+        RuntimeException last = null;
+        for (String param : new String[] {"e=0", "e=" + titleId, ""}) {
+            try (Response response = getClient().newCall(apiRequest(titleId, param, path)).execute()) {
+                return videosFromApi(response.code(), response.body().string());
+            } catch (IOException e) {
+                last = new RuntimeException(e);
+            } catch (RuntimeException e) {
+                last = e;
+                // Only keep trying while the site complains about the parameters.
+                if (e.getMessage() == null || !e.getMessage().contains("parametros")) throw e;
+            }
+        }
+        if (last.getMessage() != null && last.getMessage().contains("parametros")) {
+            throw new RuntimeException("O site recusou o pedido deste filme. Ele ainda não é suportado pela extensão.");
+        }
+        throw last;
     }
 
     @Override
@@ -495,8 +531,11 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
     }
 
     private List<Video> parseVideos(Response response) {
-        int code = response.code();
-        String text = body(response);
+        if (!response.request().url().encodedPath().startsWith("/api/")) return movieVideos(response);
+        return videosFromApi(response.code(), body(response));
+    }
+
+    private List<Video> videosFromApi(int code, String text) {
         JSONObject json;
         try {
             json = new JSONObject(text.trim());
