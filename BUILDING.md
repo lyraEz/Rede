@@ -8,7 +8,7 @@ O código fica em `src/`. O site é um Laravel com Inertia: cada página traz os
 
 - Catálogo: sliders de `/br`. Recentes: `/br/archive`. Busca: `/br/search?q=`.
 - Título e episódios: `/br/titles/{id}-{slug}` e `/br/titles/{id}-{slug}/season-{n}`.
-- Vídeo: `/api/watch/{id}/next?e={episódio}&lang=br` devolve o MP4 em `play.sources`. Exige conta logada que passou pela verificação do site; sem isso a resposta é `{"error":"login"}`.
+- Vídeo: `/api/watch/{id}/next?e={episódio}&lang=br` devolve o MP4 em `play.sources`; para filmes, `e` é o id do título. Exige conta logada que passou pela verificação do site; sem isso a resposta é `{"error":"login"}` ou `{"error":"indisponivel"}`. Nesses casos, `RedeBrowser` abre a página do player num WebView invisível, faz login com a conta salva nas configurações e espera a verificação terminar antes de tentar de novo.
 
 Para gerar o APK (Java 17 ou mais recente):
 
