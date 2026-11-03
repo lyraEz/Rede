@@ -3,4 +3,5 @@ public abstract class WebSettings {
   public abstract void setJavaScriptEnabled(boolean b);
   public abstract void setDomStorageEnabled(boolean b);
   public abstract void setUserAgentString(String ua);
+  public abstract void setMediaPlaybackRequiresUserGesture(boolean b);
 }
