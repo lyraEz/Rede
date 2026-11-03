@@ -18,6 +18,8 @@ https://raw.githubusercontent.com/lyraEz/Rede/repo/index.min.json
 
 Depois de adicionar a loja, atualize a lista de extensões no aplicativo.
 
+> **Atenção para a versão 1000-13:** a chave de assinatura foi renovada. Para instalar esta versão, desinstale a RedeToons 1000-12 ou anterior e depois instale novamente pela loja. Esse procedimento é necessário somente nesta troca de chave.
+
 ## Extensões
 
 | Extensão | Versão | Site |
@@ -28,6 +30,6 @@ A RedeToons corrige o APK da extensão publicado pela [Awerkori](https://github.
 
 Quem já usa o endereço da loja com `store-v2-1000-7.json` pode mantê-lo; ele também recebe as versões novas.
 
-A extensão usa a assinatura da Rede. Quem ainda tem o APK assinado pela Awerkori precisa desinstalá-lo antes de instalar a versão deste repositório.
+A extensão usa a assinatura da Rede. Instalações assinadas pela Awerkori ou pela chave antiga da Rede precisam ser desinstaladas antes da versão 1000-13. As próximas atualizações usarão a nova assinatura.
 
 A extensão acompanha automaticamente os redirecionamentos do site durante a reprodução. Se um domínio antigo sair do ar sem redirecionar, abra as configurações da RedeToons e preencha **Domínio do site** com a nova URL; caminhos como `/br` são aceitos.
