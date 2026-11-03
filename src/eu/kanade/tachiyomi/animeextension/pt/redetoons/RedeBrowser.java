@@ -5,10 +5,13 @@ import android.os.Handler;
 import android.os.Looper;
 import android.webkit.CookieManager;
 import android.webkit.ValueCallback;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -25,6 +28,17 @@ final class RedeBrowser {
     private static final long TIMEOUT_MS = 60_000;
     private static final long POLL_MS = 1_000;
 
+    /** Video files requested by the site's player. */
+    private static final Pattern MEDIA = Pattern.compile("(?i)^https?://[^?#]+\\.(mp4|m3u8)(\\?.*)?$");
+
+    /** Starts the player inside the same-origin iframe, as a click on play would. */
+    private static final String PLAY_JS = "(function(){function go(d){if(!d)return;"
+            + "var v=d.querySelectorAll('video');for(var i=0;i<v.length;i++){try{v[i].muted=true;var p=v[i].play();if(p&&p.catch)p.catch(function(){})}catch(e){}}"
+            + "var b=d.querySelectorAll('[class*=play],[aria-label*=lay],[aria-label*=eproduz],[title*=lay]');"
+            + "for(var j=0;j<b.length&&j<3;j++){try{b[j].click()}catch(e){}}"
+            + "var f=d.querySelectorAll('iframe');for(var k=0;k<f.length;k++){try{go(f[k].contentDocument)}catch(e){}}}"
+            + "go(document)})()";
+
     private static final String STATE_JS = "(function(){var t=document.querySelector('[name=cf-turnstile-response]');"
             + "var e=document.querySelector('.form-error,.error,.alert-danger,[role=alert]');"
             + "return JSON.stringify({p:location.pathname,t:document.title||'',"
@@ -35,6 +49,8 @@ final class RedeBrowser {
     private final String userAgent;
     private final String username;
     private final String password;
+    private final boolean captureMedia;
+    private volatile String mediaUrl;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final CountDownLatch done = new CountDownLatch(1);
@@ -43,7 +59,9 @@ final class RedeBrowser {
     private boolean filled;
     private long submittedAt;
 
-    private RedeBrowser(Context context, String userAgent, String username, String password) {
+    private RedeBrowser(Context context, String userAgent, String username, String password,
+                        boolean captureMedia) {
+        this.captureMedia = captureMedia;
         this.context = context;
         this.userAgent = userAgent;
         this.username = username;
@@ -54,8 +72,28 @@ final class RedeBrowser {
     static synchronized Result unlock(Context context, String watchUrl, String userAgent,
                                       String username, String password) {
         if (Looper.myLooper() == Looper.getMainLooper()) return Result.TIMEOUT;
-        RedeBrowser browser = new RedeBrowser(context, userAgent, username, password);
+        RedeBrowser browser = new RedeBrowser(context, userAgent, username, password, false);
         return browser.run(watchUrl);
+    }
+
+    /** Video address the site's player requested, after login and the security check. */
+    static final class Capture {
+        final Result result;
+        final String url;
+
+        Capture(Result result, String url) {
+            this.result = result;
+            this.url = url;
+        }
+    }
+
+    /** Opens the watch page and returns the first video file its player requests. */
+    static synchronized Capture captureVideo(Context context, String watchUrl, String userAgent,
+                                             String username, String password) {
+        if (Looper.myLooper() == Looper.getMainLooper()) return new Capture(Result.TIMEOUT, null);
+        RedeBrowser browser = new RedeBrowser(context, userAgent, username, password, true);
+        Result result = browser.run(watchUrl);
+        return new Capture(result, browser.mediaUrl);
     }
 
     private Result run(final String url) {
@@ -90,11 +128,22 @@ final class RedeBrowser {
         webView.layout(0, 0, 1080, 1920);
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
+        webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
         if (userAgent != null && !userAgent.isEmpty()) webView.getSettings().setUserAgentString(userAgent);
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, true);
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                String url = request.getUrl().toString();
+                if (captureMedia && mediaUrl == null && MEDIA.matcher(url).matches()) {
+                    mediaUrl = url;
+                    finish(Result.OK);
+                }
+                return null;
+            }
+        });
         webView.loadUrl(url);
         main.postDelayed(new Runnable() {
             @Override
@@ -141,7 +190,11 @@ final class RedeBrowser {
         boolean verifying = title.contains("Verifica");
 
         if (path.contains("/watch/") && !verifying && !title.isEmpty()) {
-            finish(Result.OK);
+            if (!captureMedia) {
+                finish(Result.OK);
+            } else if (mediaUrl == null) {
+                webView.evaluateJavascript(PLAY_JS, null);
+            }
             return;
         }
         if (!state.optBoolean("u")) return;
