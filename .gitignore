@@ -1,0 +1,4 @@
+/build-tools/.cache/
+*.p12
+*.jks
+*.keystore
