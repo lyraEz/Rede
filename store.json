@@ -1,7 +1,7 @@
 {
   "name": "Rede",
   "badgeLabel": "Rede",
-  "signingKey": "591ad45499955a7380d53c627e8f96128a53aec00020f154de917ab7b8e896e3",
+  "signingKey": "bf9ae854e18ecdceaf2a4cae112f006252e2632ba9ba18df5f7538adc7b84724",
   "contact": {
     "website": "https://github.com/lyraEz/Rede",
     "discord": null
@@ -12,12 +12,12 @@
         "name": "RedeToons",
         "packageName": "eu.kanade.tachiyomi.animeextension.pt.redetoons",
         "resources": {
-          "apkUrl": "https://raw.githubusercontent.com/lyraEz/Rede/repo/apk/aniyomi-pt.redetoons-v1000-17.apk",
+          "apkUrl": "https://raw.githubusercontent.com/lyraEz/Rede/repo/apk/aniyomi-pt.redetoons-v1000-18.apk",
           "iconUrl": "https://raw.githubusercontent.com/lyraEz/Rede/repo/icon/eu.kanade.tachiyomi.animeextension.pt.redetoons.png"
         },
         "extensionLib": "14",
-        "versionCode": 1000017,
-        "versionName": "14.1000-17",
+        "versionCode": 1000018,
+        "versionName": "14.1000-18",
         "contentWarning": "SAFE",
         "isTorrent": false,
         "sources": [
@@ -25,7 +25,7 @@
             "id": 5791416117185453153,
             "name": "RedeToons",
             "language": "pt-BR",
-            "homeUrl": "https://redetoons.watch",
+            "homeUrl": "https://redetoons.org",
             "mirrorUrls": [],
             "message": null
           }

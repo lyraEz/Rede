@@ -15,12 +15,12 @@ Para gerar o APK (Java 17 ou mais recente):
 
 ```sh
 REDE_KEY_PASS=... python build_extension.py --keystore rede-extensoes.p12 \
-    --version 1000-15 --template apk/aniyomi-pt.redetoons-v1000-14.apk
+    --version 1000-19 --template apk/aniyomi-pt.redetoons-v1000-18.apk
 ```
 
 O script baixa as ferramentas para `build-tools/.cache`, compila `src/` contra as interfaces em `build-tools/stubs`, reaproveita manifesto e ícone do APK indicado em `--template` e assina com esquema v2. O nome de versão começa com a versão da biblioteca (`14.`), usada pelo NyanTV para reconhecer a extensão.
 
-A chave privada não fica no repositório; guarde o `.p12` e a senha fora dele. A partir da versão 1000-14, o certificado SHA-256 é `591ad45499955a7380d53c627e8f96128a53aec00020f154de917ab7b8e896e3`.
+A chave privada não fica no repositório; guarde o `.p12` e a senha fora dele. A partir da versão 1000-18, o certificado SHA-256 é `bf9ae854e18ecdceaf2a4cae112f006252e2632ba9ba18df5f7538adc7b84724` (1000-14 a 1000-17: `591ad454…96e3`).
 
 Para adicionar uma extensão ao catálogo, coloque o APK em `apk/`, o ícone em `icon/`, atualize `extensions.json` e execute:
 
