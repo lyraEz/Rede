@@ -17,10 +17,11 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * Opens a watch page in an off-screen WebView so the site's Cloudflare check can
- * issue the play ticket, logging in with the saved account when the site asks.
- * The cookies land in the shared WebView cookie store, which the app's HTTP
- * client also uses.
+ * Opens a watch page in an off-screen WebView, logging in with the saved account
+ * when the site asks, and waits until the site's player has loaded a video. By
+ * then the site has accepted the session and its security check, so the
+ * extension can call the play API itself. The cookies land in the shared WebView
+ * cookie store, which the app's HTTP client also uses.
  */
 final class RedeBrowser {
 
@@ -30,17 +31,9 @@ final class RedeBrowser {
     private static final long POLL_MS = 1_000;
     private static final int MAX_RELOADS = 2;
 
-    /**
-     * Video files and HLS/DASH manifests requested by the site's player, including
-     * extensionless playlist endpoints such as /playlist/123?token=...
-     */
+    /** Video files and HLS/DASH manifests, including extensionless /playlist/ endpoints. */
     static final Pattern MEDIA = Pattern.compile(
             "(?i)^https?://[^?#]+(\\.(mp4|m3u8|mpd)|/playlist/[^/?#.]+)([?#].*)?$");
-
-    /** Hosts the player never takes its video from. */
-    private static final Pattern IGNORED_HOST = Pattern.compile(
-            "(?i)(^|\\.)(youtube\\.com|youtu\\.be|googlevideo\\.com|ytimg\\.com|google\\.com|"
-                    + "cloudflareinsights\\.com|amung\\.us|waust\\.at)$");
 
     /**
      * The site's anti-devtools script redirects the whole page to YouTube when it
@@ -49,38 +42,21 @@ final class RedeBrowser {
     private static final Pattern GUARD_SCRIPT = Pattern.compile(
             "(?i)/(su-guard|gw|disable-devtool)[^/]*\\.js([?#].*)?$");
 
-    /** Starts the player inside the same-origin iframes, as a tap on play would. */
-    private static final String PLAY_JS = "(function(){function go(d,top){if(!d)return;"
-            + "var v=d.querySelectorAll('video');for(var i=0;i<v.length;i++){try{v[i].muted=true;"
-            + "if(v[i].paused){var p=v[i].play();if(p&&p.catch)p.catch(function(){})}}catch(e){}}"
-            + "if(!top){var b=d.querySelectorAll('button,[role=button],.vjs-big-play-button,.jw-display-icon-container,"
-            + ".plyr__control--overlaid,[class*=big-play],[class*=play-button],[class*=btn-play],[aria-label*=lay],[aria-label*=eproduz]');"
-            + "var n=0;for(var j=0;j<b.length&&n<3;j++){var c=String(b[j].className||'')+' '+(b[j].getAttribute('aria-label')||'');"
-            + "if(/play|reproduz|assistir/i.test(c)&&!/pause|playlist|playback|speed|rate/i.test(c)){try{b[j].click();n++}catch(e){}}}}"
-            + "var f=d.querySelectorAll('iframe');for(var k=0;k<f.length;k++){try{go(f[k].contentDocument,false)}catch(e){}}}"
-            + "go(document,true)})()";
-
-    /** Page state, plus any video address the player already loaded. */
+    /** Page state, and whether the player in any frame got a video or gave up. */
     private static final String STATE_JS = "(function(){var t=document.querySelector('[name=cf-turnstile-response]');"
-            + "var e=document.querySelector('.form-error,.error,.alert-danger,[role=alert]');"
-            + "var re=/^https?:\\/\\/[^?#]+(\\.(mp4|m3u8|mpd)|\\/playlist\\/[^\\/?#.]+)([?#].*)?$/i;"
-            + "var bad=/(^|\\.)(youtube\\.com|youtu\\.be|googlevideo\\.com|ytimg\\.com)$/i;var m='';"
-            + "function ok(u){if(!u||!re.test(u))return false;try{return !bad.test(new URL(u).hostname)}catch(x){return false}}"
-            + "function scan(w){if(m||!w)return;try{var d=w.document;var v=d.querySelectorAll('video,video source');"
-            + "for(var i=0;i<v.length&&!m;i++){var s=v[i].currentSrc||v[i].src||'';if(ok(s))m=s}"
-            + "var r=w.performance&&w.performance.getEntriesByType?w.performance.getEntriesByType('resource'):[];"
-            + "for(var j=0;j<r.length&&!m;j++){if(ok(r[j].name))m=r[j].name}"
-            + "for(var k=0;k<w.frames.length&&!m;k++)scan(w.frames[k])}catch(x){}}scan(window);"
+            + "var e=document.querySelector('.form-error,.error,.alert-danger,[role=alert]');var v=false,x=false;"
+            + "function scan(w){if(!w)return;try{var d=w.document;var l=d.querySelectorAll('video');"
+            + "for(var i=0;i<l.length;i++){if(l[i].currentSrc||l[i].getAttribute('src'))v=true}"
+            + "if(d.body&&d.body.classList.contains('bp-has-error'))x=true;"
+            + "for(var k=0;k<w.frames.length;k++)scan(w.frames[k])}catch(y){}}scan(window);"
             + "return JSON.stringify({h:location.hostname,p:location.pathname,t:document.title||'',"
             + "u:!!document.getElementById('username'),c:t?t.value.length:-1,"
-            + "e:e?(e.textContent||'').trim():'',m:m})})()";
+            + "e:e?(e.textContent||'').trim():'',v:v,x:x})})()";
 
     private final Context context;
     private final String userAgent;
     private final String username;
     private final String password;
-    private final boolean captureMedia;
-    private volatile String mediaUrl;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final CountDownLatch done = new CountDownLatch(1);
@@ -92,41 +68,19 @@ final class RedeBrowser {
     private boolean filled;
     private long submittedAt;
 
-    private RedeBrowser(Context context, String userAgent, String username, String password,
-                        boolean captureMedia) {
-        this.captureMedia = captureMedia;
+    private RedeBrowser(Context context, String userAgent, String username, String password) {
         this.context = context;
         this.userAgent = userAgent;
         this.username = username;
         this.password = password;
     }
 
-    /** Blocks the calling (background) thread until the page is unlocked or the attempt fails. */
+    /** Blocks the calling (background) thread until the player loaded or the attempt fails. */
     static synchronized Result unlock(Context context, String watchUrl, String userAgent,
                                       String username, String password) {
         if (Looper.myLooper() == Looper.getMainLooper()) return Result.TIMEOUT;
-        RedeBrowser browser = new RedeBrowser(context, userAgent, username, password, false);
+        RedeBrowser browser = new RedeBrowser(context, userAgent, username, password);
         return browser.run(watchUrl);
-    }
-
-    /** Video address the site's player requested, after login and the security check. */
-    static final class Capture {
-        final Result result;
-        final String url;
-
-        Capture(Result result, String url) {
-            this.result = result;
-            this.url = url;
-        }
-    }
-
-    /** Opens the watch page and returns the first video file its player requests. */
-    static synchronized Capture captureVideo(Context context, String watchUrl, String userAgent,
-                                             String username, String password) {
-        if (Looper.myLooper() == Looper.getMainLooper()) return new Capture(Result.TIMEOUT, null);
-        RedeBrowser browser = new RedeBrowser(context, userAgent, username, password, true);
-        Result result = browser.run(watchUrl);
-        return new Capture(result, browser.mediaUrl);
     }
 
     /** Cookies the WebView holds for a URL, so the app's player can send them too. */
@@ -172,10 +126,6 @@ final class RedeBrowser {
         }
     }
 
-    private boolean isMedia(String url) {
-        return MEDIA.matcher(url).matches() && !IGNORED_HOST.matcher(hostOf(url)).find();
-    }
-
     private void start(String url) {
         final long deadline = System.currentTimeMillis() + TIMEOUT_MS;
         startUrl = url;
@@ -199,14 +149,9 @@ final class RedeBrowser {
 
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                if (GUARD_SCRIPT.matcher(url).find()) {
+                if (GUARD_SCRIPT.matcher(request.getUrl().toString()).find()) {
                     return new WebResourceResponse("application/javascript", "utf-8",
                             new ByteArrayInputStream(new byte[0]));
-                }
-                if (captureMedia && mediaUrl == null && isMedia(url)) {
-                    mediaUrl = url;
-                    finish(Result.OK);
                 }
                 return null;
             }
@@ -255,7 +200,6 @@ final class RedeBrowser {
         String host = state.optString("h");
         String path = state.optString("p");
         String title = state.optString("t");
-        boolean verifying = title.contains("Verifica");
 
         // Pushed off the site (anti-devtools redirect): load the watch page again.
         if (!host.isEmpty() && !host.equals(siteHost) && !host.endsWith("cloudflare.com")) {
@@ -263,19 +207,9 @@ final class RedeBrowser {
             return;
         }
 
-        String found = state.optString("m");
-        if (captureMedia && mediaUrl == null && !found.isEmpty() && isMedia(found)) {
-            mediaUrl = found;
-            finish(Result.OK);
-            return;
-        }
-
-        if (path.contains("/watch/") && !verifying && !title.isEmpty()) {
-            if (!captureMedia) {
-                finish(Result.OK);
-            } else if (mediaUrl == null) {
-                webView.evaluateJavascript(PLAY_JS, null);
-            }
+        if (path.contains("/watch/") && !title.contains("Verifica")) {
+            // The player got its video (or reported an error): the session is ready.
+            if (state.optBoolean("v") || state.optBoolean("x")) finish(Result.OK);
             return;
         }
         if (!state.optBoolean("u")) return;

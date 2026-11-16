@@ -12,12 +12,12 @@
         "name": "RedeToons",
         "packageName": "eu.kanade.tachiyomi.animeextension.pt.redetoons",
         "resources": {
-          "apkUrl": "https://raw.githubusercontent.com/lyraEz/Rede/repo/apk/aniyomi-pt.redetoons-v1000-18.apk",
+          "apkUrl": "https://raw.githubusercontent.com/lyraEz/Rede/repo/apk/aniyomi-pt.redetoons-v1000-19.apk",
           "iconUrl": "https://raw.githubusercontent.com/lyraEz/Rede/repo/icon/eu.kanade.tachiyomi.animeextension.pt.redetoons.png"
         },
         "extensionLib": "14",
-        "versionCode": 1000018,
-        "versionName": "14.1000-18",
+        "versionCode": 1000019,
+        "versionName": "14.1000-19",
         "contentWarning": "SAFE",
         "isTorrent": false,
         "sources": [

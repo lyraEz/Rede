@@ -35,10 +35,10 @@ import org.json.JSONObject;
 
 /**
  * RedeToons runs a StreamingCommunity-style Laravel/Inertia site. Every page
- * embeds its data as JSON in a {@code <script id="su-page-data">} tag. Episodes
- * try {@code /api/watch/{title}/next?e={episode}} first; when it has no video,
- * and for movies, the watch page plays in an off-screen WebView and the video
- * file its player requests is used. Playback needs a logged-in account.
+ * embeds its data as JSON in a {@code <script id="su-page-data">} tag. Videos come
+ * from the same API the site's player uses: the play token in the player's
+ * embedUrl is traded at {@code /api/play/{token}} for the MP4 sources. Playback
+ * needs a logged-in account that passed the site's security check.
  */
 public final class RedeToons extends AnimeHttpSource implements ConfigurableAnimeSource {
 
@@ -499,52 +499,6 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         return get(url.toString());
     }
 
-    private Request apiRequest(String titleId, String episodeParam, String watchPath) {
-        String url = getBaseUrl() + "/api/watch/" + titleId + "/next?"
-                + (episodeParam.isEmpty() ? "" : episodeParam + "&") + "lang=br";
-        Headers headers = getHeaders().newBuilder()
-                .set("Accept", "application/json")
-                .set("Referer", getBaseUrl() + watchPath)
-                .build();
-        return new Request.Builder().url(url).headers(headers).build();
-    }
-
-    /** Videos, or the API error that stopped them. */
-    private static final class PlayResult {
-        List<Video> videos;
-        String error = "";
-    }
-
-    private PlayResult fetchPlay(String titleId, String[] params, String watchPath) {
-        PlayResult result = new PlayResult();
-        for (String param : params) {
-            String text;
-            try (Response response = getClient().newCall(apiRequest(titleId, param, watchPath)).execute()) {
-                text = response.body().string();
-            } catch (IOException e) {
-                result.error = "rede";
-                continue;
-            }
-            JSONObject json;
-            try {
-                json = new JSONObject(text.trim());
-            } catch (JSONException e) {
-                result.error = "verificacao";
-                return result;
-            }
-            String error = json.optString("error", "");
-            if (error.isEmpty()) {
-                result.videos = videosFrom(json.has("play") ? json.opt("play") : json);
-                if (result.videos.isEmpty()) result.error = "sem_video";
-                return result;
-            }
-            result.error = error;
-            // Movies: keep trying while the site rejects the parameters.
-            if (!"parametros".equals(error)) return result;
-        }
-        return result;
-    }
-
     @Override
     protected Request videoListRequest(SEpisode episode) {
         return playRequest(episode);
@@ -575,6 +529,14 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         throw new UnsupportedOperationException();
     }
 
+    /** What one round of play requests produced. */
+    private static final class Play {
+        List<Video> videos;
+        /** The site wants a login or its security check: retry after the hidden browser. */
+        boolean needsBrowser;
+        String message = "";
+    }
+
     private List<Video> parseVideos(Response response) {
         String watchPath = response.request().url().queryParameter("rt");
         response.close();
@@ -588,47 +550,234 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         String pagePath = locale + "/watch/" + titleId
                 + (episodeId == null ? "?type=movie" : "?type=tv&e=" + episodeId);
 
+        Play play = fetchPlay(titleId, episodeId, pagePath);
+        if (play.videos != null && !play.videos.isEmpty()) return play.videos;
+        if (!play.needsBrowser) throw new RuntimeException(play.message);
+
+        // Log in and pass the site's security check in the hidden browser, then try again.
         String user = preferences().getString(PREF_USER, "");
         String pass = preferences().getString(PREF_PASS, "");
-
-        // Episodes: the watch API is the fast path when the site still answers with sources.
-        PlayResult result = null;
-        if (episodeId != null) {
-            result = fetchPlay(titleId, new String[] {"e=" + episodeId}, pagePath);
-            if (result.videos != null && !result.videos.isEmpty()) return result.videos;
-        }
-
-        // Otherwise play the watch page in the hidden browser, which also logs in and
-        // passes the security check, and take the video file the site's player loads.
-        RedeBrowser.Capture capture = RedeBrowser.captureVideo(appContext(), getBaseUrl() + pagePath,
+        RedeBrowser.Result browser = RedeBrowser.unlock(appContext(), getBaseUrl() + pagePath,
                 getHeaders().get("User-Agent"), user, pass);
-        if (capture.url != null) return capturedVideo(capture.url);
-        if (capture.result == RedeBrowser.Result.NEEDS_LOGIN) {
+        if (browser == RedeBrowser.Result.NEEDS_LOGIN) {
             throw new RuntimeException("Para assistir, coloque o e-mail e a senha da sua conta RedeToons nas configurações da extensão.");
         }
-        if (capture.result == RedeBrowser.Result.LOGIN_REJECTED) {
+        if (browser == RedeBrowser.Result.LOGIN_REJECTED) {
             throw new RuntimeException("O site recusou o login. Confira o e-mail e a senha nas configurações da extensão.");
         }
-
-        if (episodeId != null) {
-            // The browser visit may have renewed the play ticket.
-            result = fetchPlay(titleId, new String[] {"e=" + episodeId}, pagePath);
-            if (result.videos != null && !result.videos.isEmpty()) return result.videos;
-            if (!"sem_video".equals(result.error)) {
-                throw new RuntimeException(errorMessage(result.error, capture.result, user.isEmpty() || pass.isEmpty()));
-            }
+        play = fetchPlay(titleId, episodeId, pagePath);
+        if (play.videos != null && !play.videos.isEmpty()) return play.videos;
+        if (play.needsBrowser) {
+            throw new RuntimeException("O site não liberou o vídeo: a verificação de segurança não foi concluída. "
+                    + "Abra o título no WebView, dê play uma vez e tente de novo. (" + play.message + ")");
         }
-        throw new RuntimeException("O player do site não entregou o vídeo a tempo. Tente de novo; se continuar, "
-                + "abra o título no WebView, dê play uma vez e tente de novo.");
+        throw new RuntimeException(play.message);
     }
 
-    private List<Video> capturedVideo(String url) {
+    /**
+     * Mirrors the site's player: get the play token (p) from the episode API or the
+     * watch page, then ask /api/play/{p} for the video sources.
+     */
+    private Play fetchPlay(String titleId, String episodeId, String pagePath) {
+        Play play = new Play();
+        String embedUrl = null;
+        String grant = null;
+        try {
+            if (episodeId != null) {
+                JSONObject next = getJson(getBaseUrl() + "/api/watch/" + titleId + "/next?e=" + episodeId + "&lang=br",
+                        getBaseUrl() + pagePath);
+                if (next != null) {
+                    String error = next.optString("error", "");
+                    if (error.equals("login") || error.equals("indisponivel")) {
+                        play.needsBrowser = true;
+                        play.message = "watch: " + error;
+                        return play;
+                    }
+                    // Older answers carried the video addresses directly.
+                    List<Video> direct = videosFrom(next.opt("play"));
+                    if (!direct.isEmpty()) {
+                        play.videos = direct;
+                        return play;
+                    }
+                    embedUrl = next.optString("embedUrl", null);
+                    JSONObject p = next.optJSONObject("play");
+                    if (p != null) grant = p.optString("grant", null);
+                }
+            }
+            if (embedUrl == null || embedUrl.isEmpty()) {
+                Response page = getClient().newCall(get(getBaseUrl() + pagePath)).execute();
+                JSONObject props;
+                try {
+                    props = props(body(page));
+                } catch (RuntimeException e) {
+                    play.needsBrowser = true;
+                    play.message = "página: " + e.getMessage();
+                    return play;
+                }
+                if (props.optBoolean("redirectToLogin")) {
+                    play.needsBrowser = true;
+                    play.message = "login";
+                    return play;
+                }
+                embedUrl = props.optString("embedUrl", "");
+            }
+        } catch (IOException e) {
+            play.message = "Sem conexão com o site.";
+            return play;
+        }
+
+        if (embedUrl == null || embedUrl.isEmpty()) {
+            play.message = "O site não mostrou o player deste título.";
+            return play;
+        }
+        okhttp3.HttpUrl embed = okhttp3.HttpUrl.get(getBaseUrl() + (embedUrl.startsWith("/") ? "" : "/") + embedUrl);
+        if ("unavailable".equals(embed.queryParameter("err"))) {
+            play.message = "Este conteúdo ainda não está disponível no site.";
+            return play;
+        }
+        String token = embed.queryParameter("p");
+        if (token == null || token.isEmpty()) {
+            play.message = "O site não mostrou o player deste título.";
+            return play;
+        }
+        return fetchSources(token, grant, embed.toString(), play);
+    }
+
+    private Play fetchSources(String token, String grant, String referer, Play play) {
+        boolean renewed = false;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            okhttp3.HttpUrl url = okhttp3.HttpUrl.get(getBaseUrl() + "/api/play/").newBuilder()
+                    .addPathSegment(token).build();
+            Headers.Builder headers = getHeaders().newBuilder()
+                    .set("Accept", "*/*")
+                    .set("Referer", referer);
+            if (grant != null && !grant.isEmpty() && !renewed) headers.set("X-SU-Grant", grant);
+            int code;
+            String text;
+            try (Response response = getClient().newCall(
+                    new Request.Builder().url(url).headers(headers.build()).build()).execute()) {
+                code = response.code();
+                text = response.body().string();
+            } catch (IOException e) {
+                play.message = "Sem conexão com o site.";
+                return play;
+            }
+            JSONObject json = null;
+            try {
+                json = new JSONObject(text.trim());
+            } catch (JSONException ignored) {
+                // Not JSON: a Cloudflare page or similar.
+            }
+            String error = json == null ? "" : json.optString("error", "");
+
+            if (code == 200 && json != null) {
+                Object wait = json.opt("espera");
+                if (wait != null && wait != JSONObject.NULL && !Boolean.FALSE.equals(wait) && !"".equals(wait)
+                        && !(wait instanceof Number && ((Number) wait).doubleValue() == 0)) {
+                    play.message = "O site está com fila para assistir. Tente de novo em alguns minutos.";
+                    return play;
+                }
+                play.videos = sourcesFrom(json.optJSONArray("sources"));
+                if (play.videos.isEmpty()) play.message = "Este conteúdo ainda não está disponível no site.";
+                return play;
+            }
+            if (code == 403 && "token".equals(error) && !renewed) {
+                String fresh = renewToken(token, referer);
+                if (fresh == null) {
+                    play.needsBrowser = true;
+                    play.message = "renovar";
+                    return play;
+                }
+                token = fresh;
+                renewed = true;
+                continue;
+            }
+            if (code == 429 || code >= 500) {
+                try {
+                    Thread.sleep(1500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                play.message = "O site respondeu HTTP " + code + ". Tente de novo.";
+                continue;
+            }
+            if (code == 404) {
+                play.message = "Este conteúdo ainda não está disponível no site.";
+                return play;
+            }
+            // 401 (login or verification), 403 and Cloudflare pages need the browser.
+            play.needsBrowser = true;
+            play.message = "HTTP " + code + (error.isEmpty() ? (json == null ? " sem JSON" : "") : " " + error);
+            return play;
+        }
+        return play;
+    }
+
+    /** The play token expires; the site trades the old one for a new one. */
+    private String renewToken(String token, String referer) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("p", token);
+        } catch (JSONException e) {
+            return null;
+        }
+        Request request = new Request.Builder()
+                .url(getBaseUrl() + "/api/play/renovar")
+                .headers(getHeaders().newBuilder().set("Accept", "*/*").set("Referer", referer)
+                        .set("Origin", getBaseUrl()).build())
+                .post(okhttp3.RequestBody.create(body.toString(), okhttp3.MediaType.get("application/json")))
+                .build();
+        try (Response response = getClient().newCall(request).execute()) {
+            if (!response.isSuccessful()) return null;
+            String fresh = new JSONObject(response.body().string().trim()).optString("p", "");
+            return fresh.isEmpty() ? null : fresh;
+        } catch (IOException | JSONException e) {
+            return null;
+        }
+    }
+
+    private JSONObject getJson(String url, String referer) throws IOException {
+        Headers headers = getHeaders().newBuilder()
+                .set("Accept", "application/json")
+                .set("Referer", referer)
+                .build();
+        try (Response response = getClient().newCall(new Request.Builder().url(url).headers(headers).build()).execute()) {
+            String text = response.body().string().trim();
+            return text.startsWith("{") ? new JSONObject(text) : null;
+        } catch (JSONException e) {
+            return null;
+        }
+    }
+
+    /** Plain (not service-worker encrypted) sources: one per audio version. */
+    private List<Video> sourcesFrom(JSONArray sources) {
         List<Video> videos = new ArrayList<>();
-        videos.add(new Video(url, "RedeToons", url, videoHeaders(url), null, null, 0x30, null));
+        if (sources == null) return videos;
+        Set<String> seen = new HashSet<>();
+        for (int i = 0; i < sources.length(); i++) {
+            JSONObject source = sources.optJSONObject(i);
+            if (source == null) continue;
+            String src = absolute(source.optString("src", ""));
+            if (src.isEmpty() || !seen.add(src)) continue;
+            String label = source.optString("label", source.optString("audio", ""));
+            Video video = new Video(src, label.isEmpty() ? "RedeToons" : "RedeToons - " + label, src,
+                    videoHeaders(src), null, null, 0x30, null);
+            // The dubbed version first, as the site does.
+            if ("DUB".equals(source.optString("audio"))) videos.add(0, video);
+            else videos.add(video);
+        }
         return videos;
     }
 
-    /** Headers the site's player sent, including the cookies the CDN may check. */
+    private String absolute(String src) {
+        src = src.trim();
+        if (src.startsWith("//")) return "https:" + src;
+        if (src.startsWith("/")) return getBaseUrl() + src;
+        return src;
+    }
+
+    /** Headers the site's player sent, including the cookies the server may check. */
     private Headers videoHeaders(String url) {
         Headers.Builder headers = new Headers.Builder()
                 .set("Referer", getBaseUrl() + "/")
@@ -640,37 +789,13 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         return headers.build();
     }
 
-    private static String errorMessage(String error, RedeBrowser.Result browser, boolean noAccount) {
-        switch (error) {
-            case "login":
-                return noAccount
-                        ? "Para assistir, coloque o e-mail e a senha da sua conta RedeToons nas configurações da extensão."
-                        : "Não foi possível entrar na sua conta. Confira o e-mail e a senha nas configurações da extensão.";
-            case "indisponivel":
-                return browser == RedeBrowser.Result.TIMEOUT
-                        ? "O site não liberou este vídeo: a verificação de segurança não terminou a tempo. Tente de novo."
-                        : "Este título não está disponível para assistir no site agora.";
-            case "verificacao":
-                return "A verificação de segurança do site não foi concluída. Tente de novo em alguns segundos.";
-            case "parametros":
-                return "O site recusou o pedido deste filme. Ele ainda não é suportado pela extensão.";
-            case "rede":
-                return "Sem conexão com o site.";
-            case "sem_video":
-                return "Nenhum vídeo disponível para este episódio.";
-            default:
-                return "O site não liberou o vídeo (" + error + ").";
-        }
-    }
-
     /**
-     * Collects the video addresses from a watch API answer. The format has changed
-     * over time (play.sources[].src, play.src, and others), so look at every field.
+     * Collects video addresses from an older watch API answer (play.sources[].src,
+     * play.src and similar).
      */
     private List<Video> videosFrom(Object play) {
         List<Video> videos = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        collectVideos(play, "", videos, seen, 0);
+        collectVideos(play, "", videos, new HashSet<String>(), 0);
         return videos;
     }
 
@@ -683,21 +808,17 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         }
         if (node instanceof JSONObject) {
             JSONObject object = (JSONObject) node;
-            String own = object.optString("label", object.optString("audio",
-                    object.optString("quality", object.optString("name", label))));
+            String own = object.optString("label", object.optString("audio", label));
             java.util.Iterator<String> keys = object.keys();
             while (keys.hasNext()) {
                 String key = keys.next();
-                // Next-episode data and the embed page are not this episode's video.
-                if (key.equals("nextEpisode") || key.equals("next") || key.equals("embedUrl")) continue;
+                if (key.equals("sx")) continue; // encrypted copy for the site's service worker
                 collectVideos(object.opt(key), own, out, seen, depth + 1);
             }
             return;
         }
         if (!(node instanceof String)) return;
-        String src = ((String) node).trim().replace("\\/", "/");
-        if (src.startsWith("//")) src = "https:" + src;
-        else if (src.startsWith("/")) src = getBaseUrl() + src;
+        String src = absolute((String) node);
         if (!RedeBrowser.MEDIA.matcher(src).matches() || !seen.add(src)) return;
         String quality = label == null || label.isEmpty() || label.length() > 40 ? "RedeToons" : "RedeToons - " + label;
         out.add(new Video(src, quality, src, videoHeaders(src), null, null, 0x30, null));
