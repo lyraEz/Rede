@@ -9,6 +9,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import java.io.ByteArrayInputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -27,23 +28,52 @@ final class RedeBrowser {
 
     private static final long TIMEOUT_MS = 60_000;
     private static final long POLL_MS = 1_000;
+    private static final int MAX_RELOADS = 2;
 
-    /** Video files requested by the site's player. */
-    private static final Pattern MEDIA = Pattern.compile("(?i)^https?://[^?#]+\\.(mp4|m3u8)(\\?.*)?$");
+    /**
+     * Video files and HLS/DASH manifests requested by the site's player, including
+     * extensionless playlist endpoints such as /playlist/123?token=...
+     */
+    static final Pattern MEDIA = Pattern.compile(
+            "(?i)^https?://[^?#]+(\\.(mp4|m3u8|mpd)|/playlist/[^/?#.]+)([?#].*)?$");
 
-    /** Starts the player inside the same-origin iframe, as a click on play would. */
-    private static final String PLAY_JS = "(function(){function go(d){if(!d)return;"
-            + "var v=d.querySelectorAll('video');for(var i=0;i<v.length;i++){try{v[i].muted=true;var p=v[i].play();if(p&&p.catch)p.catch(function(){})}catch(e){}}"
-            + "var b=d.querySelectorAll('[class*=play],[aria-label*=lay],[aria-label*=eproduz],[title*=lay]');"
-            + "for(var j=0;j<b.length&&j<3;j++){try{b[j].click()}catch(e){}}"
-            + "var f=d.querySelectorAll('iframe');for(var k=0;k<f.length;k++){try{go(f[k].contentDocument)}catch(e){}}}"
-            + "go(document)})()";
+    /** Hosts the player never takes its video from. */
+    private static final Pattern IGNORED_HOST = Pattern.compile(
+            "(?i)(^|\\.)(youtube\\.com|youtu\\.be|googlevideo\\.com|ytimg\\.com|google\\.com|"
+                    + "cloudflareinsights\\.com|amung\\.us|waust\\.at)$");
 
+    /**
+     * The site's anti-devtools script redirects the whole page to YouTube when it
+     * thinks a debugger is attached, which happens in an embedded WebView.
+     */
+    private static final Pattern GUARD_SCRIPT = Pattern.compile(
+            "(?i)/(su-guard|gw|disable-devtool)[^/]*\\.js([?#].*)?$");
+
+    /** Starts the player inside the same-origin iframes, as a tap on play would. */
+    private static final String PLAY_JS = "(function(){function go(d,top){if(!d)return;"
+            + "var v=d.querySelectorAll('video');for(var i=0;i<v.length;i++){try{v[i].muted=true;"
+            + "if(v[i].paused){var p=v[i].play();if(p&&p.catch)p.catch(function(){})}}catch(e){}}"
+            + "if(!top){var b=d.querySelectorAll('button,[role=button],.vjs-big-play-button,.jw-display-icon-container,"
+            + ".plyr__control--overlaid,[class*=big-play],[class*=play-button],[class*=btn-play],[aria-label*=lay],[aria-label*=eproduz]');"
+            + "var n=0;for(var j=0;j<b.length&&n<3;j++){var c=String(b[j].className||'')+' '+(b[j].getAttribute('aria-label')||'');"
+            + "if(/play|reproduz|assistir/i.test(c)&&!/pause|playlist|playback|speed|rate/i.test(c)){try{b[j].click();n++}catch(e){}}}}"
+            + "var f=d.querySelectorAll('iframe');for(var k=0;k<f.length;k++){try{go(f[k].contentDocument,false)}catch(e){}}}"
+            + "go(document,true)})()";
+
+    /** Page state, plus any video address the player already loaded. */
     private static final String STATE_JS = "(function(){var t=document.querySelector('[name=cf-turnstile-response]');"
             + "var e=document.querySelector('.form-error,.error,.alert-danger,[role=alert]');"
-            + "return JSON.stringify({p:location.pathname,t:document.title||'',"
+            + "var re=/^https?:\\/\\/[^?#]+(\\.(mp4|m3u8|mpd)|\\/playlist\\/[^\\/?#.]+)([?#].*)?$/i;"
+            + "var bad=/(^|\\.)(youtube\\.com|youtu\\.be|googlevideo\\.com|ytimg\\.com)$/i;var m='';"
+            + "function ok(u){if(!u||!re.test(u))return false;try{return !bad.test(new URL(u).hostname)}catch(x){return false}}"
+            + "function scan(w){if(m||!w)return;try{var d=w.document;var v=d.querySelectorAll('video,video source');"
+            + "for(var i=0;i<v.length&&!m;i++){var s=v[i].currentSrc||v[i].src||'';if(ok(s))m=s}"
+            + "var r=w.performance&&w.performance.getEntriesByType?w.performance.getEntriesByType('resource'):[];"
+            + "for(var j=0;j<r.length&&!m;j++){if(ok(r[j].name))m=r[j].name}"
+            + "for(var k=0;k<w.frames.length&&!m;k++)scan(w.frames[k])}catch(x){}}scan(window);"
+            + "return JSON.stringify({h:location.hostname,p:location.pathname,t:document.title||'',"
             + "u:!!document.getElementById('username'),c:t?t.value.length:-1,"
-            + "e:e?(e.textContent||'').trim():''})})()";
+            + "e:e?(e.textContent||'').trim():'',m:m})})()";
 
     private final Context context;
     private final String userAgent;
@@ -56,6 +86,9 @@ final class RedeBrowser {
     private final CountDownLatch done = new CountDownLatch(1);
     private volatile Result result = Result.TIMEOUT;
     private WebView webView;
+    private String startUrl;
+    private String siteHost;
+    private int reloads;
     private boolean filled;
     private long submittedAt;
 
@@ -96,6 +129,15 @@ final class RedeBrowser {
         return new Capture(result, browser.mediaUrl);
     }
 
+    /** Cookies the WebView holds for a URL, so the app's player can send them too. */
+    static String cookiesFor(String url) {
+        try {
+            return CookieManager.getInstance().getCookie(url);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     private Result run(final String url) {
         main.post(new Runnable() {
             @Override
@@ -122,8 +164,22 @@ final class RedeBrowser {
         return result;
     }
 
+    private static String hostOf(String url) {
+        try {
+            return new java.net.URL(url).getHost();
+        } catch (java.net.MalformedURLException e) {
+            return "";
+        }
+    }
+
+    private boolean isMedia(String url) {
+        return MEDIA.matcher(url).matches() && !IGNORED_HOST.matcher(hostOf(url)).find();
+    }
+
     private void start(String url) {
         final long deadline = System.currentTimeMillis() + TIMEOUT_MS;
+        startUrl = url;
+        siteHost = hostOf(url);
         webView = new WebView(context);
         webView.layout(0, 0, 1080, 1920);
         webView.getSettings().setJavaScriptEnabled(true);
@@ -135,9 +191,20 @@ final class RedeBrowser {
         cookies.setAcceptThirdPartyCookies(webView, true);
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                // Stay on the site: the anti-devtools redirect and external links lead nowhere useful.
+                String host = request.getUrl().getHost();
+                return host == null || !(host.equals(siteHost) || host.endsWith("challenges.cloudflare.com"));
+            }
+
+            @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
-                if (captureMedia && mediaUrl == null && MEDIA.matcher(url).matches()) {
+                if (GUARD_SCRIPT.matcher(url).find()) {
+                    return new WebResourceResponse("application/javascript", "utf-8",
+                            new ByteArrayInputStream(new byte[0]));
+                }
+                if (captureMedia && mediaUrl == null && isMedia(url)) {
                     mediaUrl = url;
                     finish(Result.OK);
                 }
@@ -185,9 +252,23 @@ final class RedeBrowser {
     }
 
     private void handle(JSONObject state) {
+        String host = state.optString("h");
         String path = state.optString("p");
         String title = state.optString("t");
         boolean verifying = title.contains("Verifica");
+
+        // Pushed off the site (anti-devtools redirect): load the watch page again.
+        if (!host.isEmpty() && !host.equals(siteHost) && !host.endsWith("cloudflare.com")) {
+            if (reloads++ < MAX_RELOADS) webView.loadUrl(startUrl);
+            return;
+        }
+
+        String found = state.optString("m");
+        if (captureMedia && mediaUrl == null && !found.isEmpty() && isMedia(found)) {
+            mediaUrl = found;
+            finish(Result.OK);
+            return;
+        }
 
         if (path.contains("/watch/") && !verifying && !title.isEmpty()) {
             if (!captureMedia) {

@@ -35,14 +35,14 @@ import org.json.JSONObject;
 
 /**
  * RedeToons runs a StreamingCommunity-style Laravel/Inertia site. Every page
- * embeds its data as JSON in a {@code <script id="su-page-data">} tag, and the
- * player loads a direct MP4 from {@code /api/watch/{title}/next?e={episode}}.
- * Playback needs a logged-in session that passed the site's security check,
- * which the user does once in the WebView.
+ * embeds its data as JSON in a {@code <script id="su-page-data">} tag. Episodes
+ * try {@code /api/watch/{title}/next?e={episode}} first; when it has no video,
+ * and for movies, the watch page plays in an off-screen WebView and the video
+ * file its player requests is used. Playback needs a logged-in account.
  */
 public final class RedeToons extends AnimeHttpSource implements ConfigurableAnimeSource {
 
-    private static final String DEFAULT_BASE_URL = "https://redetoons.watch";
+    private static final String DEFAULT_BASE_URL = "https://redetoons.org";
     private static final String LOCALE = "/br";
     private static final String PREF_DOMAIN = "domain_override";
     private static final String PREF_USER = "account_user";
@@ -56,7 +56,7 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
     private static final Pattern DATA_PAGE_ATTR = Pattern.compile("data-page=\"([^\"]*)\"");
     private static final Pattern TMDB_IMAGE = Pattern.compile("^/tmdb/(\\w)/+(.+)$");
     private static final Pattern LEGACY_URL = Pattern.compile("^/?(?:tv|movie)/(\\d+)$");
-    private static final Pattern WATCH_URL = Pattern.compile("/watch/(\\d+)(?:\\?e=(\\d+))?");
+    private static final Pattern WATCH_URL = Pattern.compile("/watch/(\\d+)(?:\\?(?:[^#]*&)?e=(\\d+))?");
     private static final Pattern TITLE_URL = Pattern.compile("/titles/(\\d+)(-[^/?#]*)?");
 
     /** First title id of page 1 for each listing, used to stop when paging is ignored. */
@@ -78,7 +78,7 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
     public static String normalizeDomain(String value) {
         if (value == null) return null;
         String v = value.trim().replaceFirst("(?i)^(https://[A-Za-z0-9.-]+(:[0-9]{1,5})?)(/.*)?$", "$1");
-        if (v.matches("https://redetoons[.](bond|beer|one|win|gay)")) return DEFAULT_BASE_URL;
+        if (v.matches("https://(www[.])?redetoons[.](bond|beer|one|win|gay|watch)")) return DEFAULT_BASE_URL;
         return v.matches("https://[A-Za-z0-9.-]+(:[0-9]{1,5})?") ? v : null;
     }
 
@@ -100,7 +100,7 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         EditTextPreference domain = new EditTextPreference(screen.getContext());
         domain.setKey(PREF_DOMAIN);
         domain.setTitle("Domínio do site");
-        domain.setSummary("URL HTTPS do site; caminhos como /br são opcionais. Em branco: redetoons.watch");
+        domain.setSummary("URL HTTPS do site; caminhos como /br são opcionais. Em branco: redetoons.org");
         domain.setPersistent(false);
         domain.setText(preferences().getString(PREF_DOMAIN, ""));
         domain.setOnPreferenceChangeListener(new Preference.OnPreferenceChangeListener() {
@@ -534,7 +534,7 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
             }
             String error = json.optString("error", "");
             if (error.isEmpty()) {
-                result.videos = videosFrom(json.optJSONObject("play"));
+                result.videos = videosFrom(json.has("play") ? json.opt("play") : json);
                 if (result.videos.isEmpty()) result.error = "sem_video";
                 return result;
             }
@@ -582,57 +582,62 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         Matcher m = WATCH_URL.matcher(watchPath);
         if (!m.find()) throw new RuntimeException("Episódio não encontrado no site.");
         String titleId = m.group(1);
-        // Movies have no episode id; the site has accepted e={title id} for them.
-        String[] params = m.group(2) != null
-                ? new String[] {"e=" + m.group(2)}
-                : new String[] {"e=" + titleId, "e=0", ""};
-
-        PlayResult result = fetchPlay(titleId, params, watchPath);
-        if (result.videos != null && !result.videos.isEmpty()) return result.videos;
+        String episodeId = m.group(2);
+        String locale = watchPath.startsWith("/") && watchPath.indexOf('/', 1) > 0
+                ? watchPath.substring(0, watchPath.indexOf('/', 1)) : LOCALE;
+        String pagePath = locale + "/watch/" + titleId
+                + (episodeId == null ? "?type=movie" : "?type=tv&e=" + episodeId);
 
         String user = preferences().getString(PREF_USER, "");
         String pass = preferences().getString(PREF_PASS, "");
-        if (m.group(2) == null) return movieFromPlayer(watchPath, user, pass);
 
-        // The site wants a login or a fresh security check: do both in a hidden browser.
-        RedeBrowser.Result browser = RedeBrowser.unlock(appContext(), getBaseUrl() + watchPath,
+        // Episodes: the watch API is the fast path when the site still answers with sources.
+        PlayResult result = null;
+        if (episodeId != null) {
+            result = fetchPlay(titleId, new String[] {"e=" + episodeId}, pagePath);
+            if (result.videos != null && !result.videos.isEmpty()) return result.videos;
+        }
+
+        // Otherwise play the watch page in the hidden browser, which also logs in and
+        // passes the security check, and take the video file the site's player loads.
+        RedeBrowser.Capture capture = RedeBrowser.captureVideo(appContext(), getBaseUrl() + pagePath,
                 getHeaders().get("User-Agent"), user, pass);
-        if (browser == RedeBrowser.Result.NEEDS_LOGIN) {
+        if (capture.url != null) return capturedVideo(capture.url);
+        if (capture.result == RedeBrowser.Result.NEEDS_LOGIN) {
             throw new RuntimeException("Para assistir, coloque o e-mail e a senha da sua conta RedeToons nas configurações da extensão.");
         }
-        if (browser == RedeBrowser.Result.LOGIN_REJECTED) {
+        if (capture.result == RedeBrowser.Result.LOGIN_REJECTED) {
             throw new RuntimeException("O site recusou o login. Confira o e-mail e a senha nas configurações da extensão.");
         }
 
-        result = fetchPlay(titleId, params, watchPath);
-        if (result.videos != null && !result.videos.isEmpty()) return result.videos;
-        throw new RuntimeException(errorMessage(result.error, browser, user.isEmpty() || pass.isEmpty()));
+        if (episodeId != null) {
+            // The browser visit may have renewed the play ticket.
+            result = fetchPlay(titleId, new String[] {"e=" + episodeId}, pagePath);
+            if (result.videos != null && !result.videos.isEmpty()) return result.videos;
+            if (!"sem_video".equals(result.error)) {
+                throw new RuntimeException(errorMessage(result.error, capture.result, user.isEmpty() || pass.isEmpty()));
+            }
+        }
+        throw new RuntimeException("O player do site não entregou o vídeo a tempo. Tente de novo; se continuar, "
+                + "abra o título no WebView, dê play uma vez e tente de novo.");
     }
 
-    /**
-     * The watch API does not serve movies, so play the movie page in the hidden
-     * browser and take the video file its player requests.
-     */
-    private List<Video> movieFromPlayer(String watchPath, String user, String pass) {
-        RedeBrowser.Capture capture = RedeBrowser.captureVideo(appContext(), getBaseUrl() + watchPath,
-                getHeaders().get("User-Agent"), user, pass);
-        if (capture.url != null) {
-            Headers videoHeaders = new Headers.Builder()
-                    .set("Referer", getBaseUrl() + "/")
-                    .set("Origin", getBaseUrl())
-                    .build();
-            List<Video> videos = new ArrayList<>();
-            videos.add(new Video(capture.url, "RedeToons", capture.url, videoHeaders, null, null, 0x30, null));
-            return videos;
-        }
-        switch (capture.result) {
-            case NEEDS_LOGIN:
-                throw new RuntimeException("Para assistir, coloque o e-mail e a senha da sua conta RedeToons nas configurações da extensão.");
-            case LOGIN_REJECTED:
-                throw new RuntimeException("O site recusou o login. Confira o e-mail e a senha nas configurações da extensão.");
-            default:
-                throw new RuntimeException("O player do site não entregou o vídeo deste filme a tempo. Tente de novo.");
-        }
+    private List<Video> capturedVideo(String url) {
+        List<Video> videos = new ArrayList<>();
+        videos.add(new Video(url, "RedeToons", url, videoHeaders(url), null, null, 0x30, null));
+        return videos;
+    }
+
+    /** Headers the site's player sent, including the cookies the CDN may check. */
+    private Headers videoHeaders(String url) {
+        Headers.Builder headers = new Headers.Builder()
+                .set("Referer", getBaseUrl() + "/")
+                .set("Origin", getBaseUrl());
+        String agent = getHeaders().get("User-Agent");
+        if (agent != null) headers.set("User-Agent", agent);
+        String cookies = RedeBrowser.cookiesFor(url);
+        if (cookies != null && !cookies.isEmpty()) headers.set("Cookie", cookies);
+        return headers.build();
     }
 
     private static String errorMessage(String error, RedeBrowser.Result browser, boolean noAccount) {
@@ -658,27 +663,43 @@ public final class RedeToons extends AnimeHttpSource implements ConfigurableAnim
         }
     }
 
-    private List<Video> videosFrom(JSONObject play) {
+    /**
+     * Collects the video addresses from a watch API answer. The format has changed
+     * over time (play.sources[].src, play.src, and others), so look at every field.
+     */
+    private List<Video> videosFrom(Object play) {
         List<Video> videos = new ArrayList<>();
-        if (play == null) return videos;
-        Headers videoHeaders = new Headers.Builder()
-                .set("Referer", getBaseUrl() + "/")
-                .set("Origin", getBaseUrl())
-                .build();
         Set<String> seen = new HashSet<>();
-        JSONArray sources = play.optJSONArray("sources");
-        if (sources != null) for (int i = 0; i < sources.length(); i++) {
-            JSONObject source = sources.optJSONObject(i);
-            if (source == null) continue;
-            String src = source.optString("src", "");
-            if (src.isEmpty() || !seen.add(src)) continue;
-            String label = source.optString("label", source.optString("audio", "Padrão"));
-            videos.add(new Video(src, "RedeToons - " + label, src, videoHeaders, null, null, 0x30, null));
-        }
-        String src = play.optString("src", "");
-        if (!src.isEmpty() && seen.add(src)) {
-            videos.add(new Video(src, "RedeToons", src, videoHeaders, null, null, 0x30, null));
-        }
+        collectVideos(play, "", videos, seen, 0);
         return videos;
+    }
+
+    private void collectVideos(Object node, String label, List<Video> out, Set<String> seen, int depth) {
+        if (node == null || depth > 6) return;
+        if (node instanceof JSONArray) {
+            JSONArray array = (JSONArray) node;
+            for (int i = 0; i < array.length(); i++) collectVideos(array.opt(i), label, out, seen, depth + 1);
+            return;
+        }
+        if (node instanceof JSONObject) {
+            JSONObject object = (JSONObject) node;
+            String own = object.optString("label", object.optString("audio",
+                    object.optString("quality", object.optString("name", label))));
+            java.util.Iterator<String> keys = object.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                // Next-episode data and the embed page are not this episode's video.
+                if (key.equals("nextEpisode") || key.equals("next") || key.equals("embedUrl")) continue;
+                collectVideos(object.opt(key), own, out, seen, depth + 1);
+            }
+            return;
+        }
+        if (!(node instanceof String)) return;
+        String src = ((String) node).trim().replace("\\/", "/");
+        if (src.startsWith("//")) src = "https:" + src;
+        else if (src.startsWith("/")) src = getBaseUrl() + src;
+        if (!RedeBrowser.MEDIA.matcher(src).matches() || !seen.add(src)) return;
+        String quality = label == null || label.isEmpty() || label.length() > 40 ? "RedeToons" : "RedeToons - " + label;
+        out.add(new Video(src, quality, src, videoHeaders(src), null, null, 0x30, null));
     }
 }
