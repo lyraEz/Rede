@@ -28,6 +28,7 @@ JARS = {
     "r8.jar": "https://dl.google.com/android/maven2/com/android/tools/r8/8.5.35/r8-8.5.35.jar",
     "apksig.jar": "https://dl.google.com/android/maven2/com/android/tools/build/apksig/8.5.2/apksig-8.5.2.jar",
     "okhttp.jar": "https://repo1.maven.org/maven2/com/squareup/okhttp3/okhttp/4.12.0/okhttp-4.12.0.jar",
+    "okio.jar": "https://repo1.maven.org/maven2/com/squareup/okio/okio-jvm/3.6.0/okio-jvm-3.6.0.jar",
     "json.jar": "https://repo1.maven.org/maven2/org/json/json/20240303/json-20240303.jar",
     "kotlin-stdlib.jar": "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/1.9.24/kotlin-stdlib-1.9.24.jar",
 }
@@ -54,7 +55,7 @@ def compile_dex(work):
     dex = work / "dex"
     for d in (stub_classes, classes, dex):
         d.mkdir()
-    deps = os.pathsep.join(str(jar(n)) for n in ("okhttp.jar", "json.jar", "kotlin-stdlib.jar"))
+    deps = os.pathsep.join(str(jar(n)) for n in ("okhttp.jar", "okio.jar", "json.jar", "kotlin-stdlib.jar"))
     stubs = sorted((ROOT / "build-tools" / "stubs").rglob("*.java"))
     sources = sorted((ROOT / "src").rglob("*.java"))
     run("javac", "-nowarn", "--release", "8", "-Xlint:-options", "-d", stub_classes, "-cp", deps, *stubs)
